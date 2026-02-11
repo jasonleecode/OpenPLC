@@ -1,0 +1,3 @@
+[submodule "library/matiec"]
+	path = library/matiec
+	url = git@github.com:jasonleecode/matiec.git
