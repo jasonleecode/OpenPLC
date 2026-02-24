@@ -6,39 +6,47 @@
 #include <QBrush>
 #include <QGraphicsSceneMouseEvent>
 
-// 继承自 QGraphicsObject 是为了以后支持 Qt 的属性系统和信号槽
 class BaseItem : public QGraphicsObject {
     Q_OBJECT
 public:
     explicit BaseItem(QGraphicsItem *parent = nullptr) : QGraphicsObject(parent) {
-        // 开启关键标志位：
-        // ItemIsSelectable: 允许鼠标点击选中
-        // ItemIsMovable: 允许鼠标拖拽移动
-        // ItemSendsGeometryChanges: 移动时触发 itemChange，用于网格吸附
         setFlags(ItemIsSelectable | ItemIsMovable | ItemSendsGeometryChanges | ItemIsFocusable);
     }
 
-    // 纯虚函数：每个子类必须告诉我们它的左/右连接点在哪里（为了以后画线）
-    virtual QPointF leftPort() const = 0;
+    virtual QPointF leftPort()  const = 0;
     virtual QPointF rightPort() const = 0;
 
+    // 右键菜单 / 双击编辑：弹出属性对话框（子类重写）
+    virtual void editProperties() {}
+
 protected:
-    // 网格大小，必须和 Scene 保持一致
-    const int GridSize = 20;
+    static constexpr int GridSize  = 20;   // 必须与 LadderScene::GridSize 一致
+    static constexpr int RungH     = 100;  // 必须与 LadderScene::RungHeight 一致
+    static constexpr int RungBaseY = 50;   // 第一个梯级中心 Y（= RungH / 2）
+
+    // 当前元件的端口相对于 pos() 的 Y 偏移（用于梯级吸附）
+    // 默认 20（ContactItem / CoilItem 的 H/2 = 40/2 = 20）
+    virtual int portYOffset() const { return 20; }
 
     void mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event) override {
-        Q_UNUSED(event); // 默认什么都不做
+        Q_UNUSED(event);
+        editProperties();
     }
 
-    // 核心：处理网格吸附
+    // 位置变化时：X 吸附到网格，Y 吸附到最近梯级中心
     QVariant itemChange(GraphicsItemChange change, const QVariant &value) override {
         if (change == ItemPositionChange && scene()) {
-            QPointF newPos = value.toPointF();
-            
-            // 简单的数学四舍五入算法
-            qreal x = round(newPos.x() / GridSize) * GridSize;
-            qreal y = round(newPos.y() / GridSize) * GridSize;
-            
+            QPointF p = value.toPointF();
+
+            // X: 20px 网格
+            qreal x = qRound(p.x() / GridSize) * (qreal)GridSize;
+
+            // Y: 端口对齐到最近梯级中心
+            qreal portY  = p.y() + portYOffset();
+            int   rung   = qRound((portY - RungBaseY) / (qreal)RungH);
+            rung = qMax(0, rung);
+            qreal y = RungBaseY + rung * RungH - portYOffset();
+
             return QPointF(x, y);
         }
         return QGraphicsObject::itemChange(change, value);

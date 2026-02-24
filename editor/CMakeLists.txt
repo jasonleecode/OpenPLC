@@ -54,6 +54,8 @@ set(PROJECT_SOURCES
     src/editor/scene/LadderScene.h
     src/editor/scene/LadderView.cpp
     src/editor/scene/LadderView.h
+    src/editor/scene/PlcOpenViewer.h
+    src/editor/scene/PlcOpenViewer.cpp
     src/editor/items/BaseItem.h
     src/editor/items/ContactItem.h
     src/editor/items/ContactItem.cpp
@@ -63,9 +65,21 @@ set(PROJECT_SOURCES
     src/editor/items/WireItem.cpp
     src/core/compiler/CodeGenerator.h
     src/core/compiler/CodeGenerator.cpp
+
+    # Editor 元件（新增）
+    src/editor/items/FunctionBlockItem.h
+    src/editor/items/FunctionBlockItem.cpp
+    src/editor/items/VarBoxItem.h
     
-    # Core 层
-    # src/core/models/Rung.h
+    # Core 层 — 数据模型
+    src/core/models/VariableDecl.h
+    src/core/models/PouModel.h
+    src/core/models/PouModel.cpp
+    src/core/models/ProjectModel.h
+    src/core/models/ProjectModel.cpp
+
+    # 工具类
+    src/utils/StHighlighter.h
 
     # 资源文件
     resources/tizi.qrc

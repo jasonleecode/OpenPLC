@@ -1,0 +1,307 @@
+#include "ProjectModel.h"
+
+#include <QFile>
+#include <QTextStream>
+#include <QDomDocument>
+#include <QDomElement>
+
+ProjectModel::ProjectModel(QObject* parent)
+    : QObject(parent), projectName("Untitled")
+{}
+
+ProjectModel::~ProjectModel() {
+    clear();
+}
+
+void ProjectModel::markDirty() {
+    m_dirty = true;
+    emit changed();
+}
+
+void ProjectModel::clearDirty() {
+    m_dirty = false;
+}
+
+void ProjectModel::clear() {
+    qDeleteAll(pous);
+    pous.clear();
+    projectName = "Untitled";
+    filePath.clear();
+    m_dirty = false;
+}
+
+// -------------------------------------------------------
+// POU 管理
+// -------------------------------------------------------
+PouModel* ProjectModel::addPou(const QString& name, PouType type, PouLanguage lang) {
+    auto* pou = new PouModel(name, type, lang);
+    pous.append(pou);
+    m_dirty = true;
+    emit pouAdded(pou);
+    emit changed();
+    return pou;
+}
+
+void ProjectModel::removePou(const QString& name) {
+    for (int i = 0; i < pous.size(); ++i) {
+        if (pous[i]->name == name) {
+            delete pous.takeAt(i);
+            m_dirty = true;
+            emit pouRemoved(name);
+            emit changed();
+            return;
+        }
+    }
+}
+
+PouModel* ProjectModel::findPou(const QString& name) const {
+    for (PouModel* p : pous)
+        if (p->name == name) return p;
+    return nullptr;
+}
+
+bool ProjectModel::pouNameExists(const QString& name) const {
+    return findPou(name) != nullptr;
+}
+
+// -------------------------------------------------------
+// XML 保存
+// -------------------------------------------------------
+bool ProjectModel::saveToFile(const QString& path) {
+    QDomDocument doc;
+    QDomProcessingInstruction pi = doc.createProcessingInstruction(
+        "xml", "version=\"1.0\" encoding=\"UTF-8\"");
+    doc.appendChild(pi);
+
+    QDomElement root = doc.createElement("TiZiProject");
+    root.setAttribute("name", projectName);
+    root.setAttribute("version", "1");
+    doc.appendChild(root);
+
+    for (PouModel* pou : pous) {
+        QDomElement pouElem = doc.createElement("pou");
+        pouElem.setAttribute("name",     pou->name);
+        pouElem.setAttribute("type",     PouModel::typeToString(pou->pouType));
+        pouElem.setAttribute("language", PouModel::langToString(pou->language));
+
+        // description
+        QDomElement descElem = doc.createElement("description");
+        descElem.appendChild(doc.createTextNode(pou->description));
+        pouElem.appendChild(descElem);
+
+        // variables
+        QDomElement varsElem = doc.createElement("variables");
+        for (const VariableDecl& v : pou->variables) {
+            QDomElement varElem = doc.createElement("var");
+            varElem.setAttribute("name",    v.name);
+            varElem.setAttribute("class",   v.varClass);
+            varElem.setAttribute("type",    v.type);
+            varElem.setAttribute("init",    v.initValue);
+            varElem.setAttribute("comment", v.comment);
+            varsElem.appendChild(varElem);
+        }
+        pouElem.appendChild(varsElem);
+
+        // code (text content, CDATA to preserve whitespace/special chars)
+        QDomElement codeElem = doc.createElement("code");
+        if (!pou->code.isEmpty())
+            codeElem.appendChild(doc.createCDATASection(pou->code));
+        pouElem.appendChild(codeElem);
+
+        root.appendChild(pouElem);
+    }
+
+    QFile file(path);
+    if (!file.open(QFile::WriteOnly | QFile::Text))
+        return false;
+
+    QTextStream stream(&file);
+    doc.save(stream, 2);
+
+    filePath = path;
+    m_dirty  = false;
+    return true;
+}
+
+// -------------------------------------------------------
+// XML 读档
+// -------------------------------------------------------
+bool ProjectModel::loadFromFile(const QString& path) {
+    QFile file(path);
+    if (!file.open(QFile::ReadOnly))
+        return false;
+
+    QDomDocument doc;
+    if (!doc.setContent(&file))
+        return false;
+
+    clear();
+
+    QDomElement root = doc.documentElement();
+
+    // ── PLCopen XML 格式（Beremiz/TiZi 的 .tizi PLCopen 文件） ──
+    if (root.tagName() == "project") {
+        return loadPlcOpenXml(doc, path);
+    }
+
+    // ── TiZi 自有格式 ──
+    if (root.tagName() != "TiZiProject")
+        return false;
+
+    projectName = root.attribute("name", "Untitled");
+
+    QDomNodeList pouNodes = root.elementsByTagName("pou");
+    for (int i = 0; i < pouNodes.count(); ++i) {
+        QDomElement pe = pouNodes.at(i).toElement();
+        if (pe.isNull()) continue;
+
+        const QString name = pe.attribute("name");
+        PouType    type    = PouModel::typeFromString(pe.attribute("type",     "functionBlock"));
+        PouLanguage lang   = PouModel::langFromString(pe.attribute("language", "LD"));
+
+        PouModel* pou  = new PouModel(name, type, lang);
+        pou->description = pe.firstChildElement("description").text();
+        pou->code        = pe.firstChildElement("code").text();
+
+        QDomNodeList varNodes = pe.firstChildElement("variables").elementsByTagName("var");
+        for (int j = 0; j < varNodes.count(); ++j) {
+            QDomElement ve = varNodes.at(j).toElement();
+            VariableDecl v;
+            v.name      = ve.attribute("name");
+            v.varClass  = ve.attribute("class");
+            v.type      = ve.attribute("type");
+            v.initValue = ve.attribute("init");
+            v.comment   = ve.attribute("comment");
+            pou->variables.append(v);
+        }
+        pous.append(pou);
+    }
+
+    filePath = path;
+    m_dirty  = false;
+    emit changed();
+    return true;
+}
+
+// -------------------------------------------------------
+// PLCopen XML 导入（IEC 61131-3 标准格式，Beremiz 兼容）
+// -------------------------------------------------------
+bool ProjectModel::loadPlcOpenXml(const QDomDocument& doc, const QString& path)
+{
+    QDomElement root = doc.documentElement(); // <project>
+
+    // 项目名来自 <contentHeader name="...">
+    QDomElement hdr = root.firstChildElement("contentHeader");
+    projectName = hdr.attribute("name", "Imported Project");
+
+    // 辅助函数：把 PLCopen varClass 组名映射到我们的字符串
+    auto classStr = [](const QString& tagName) -> QString {
+        if (tagName == "inputVars")    return "Input";
+        if (tagName == "outputVars")   return "Output";
+        if (tagName == "inOutVars")    return "InOut";
+        if (tagName == "localVars")    return "Local";
+        if (tagName == "externalVars") return "External";
+        if (tagName == "globalVars")   return "Global";
+        return "Local";
+    };
+
+    // 辅助函数：解析 <type><BOOL/>|<INT/>|<derived name="..."/> 等
+    auto parseType = [](const QDomElement& typeElem) -> QString {
+        QDomElement child = typeElem.firstChildElement();
+        if (child.isNull()) return "BOOL";
+        if (child.tagName() == "derived") return child.attribute("name");
+        return child.tagName(); // BOOL INT REAL …
+    };
+
+    // ── 遍历 <types><pous><pou> ──
+    QDomElement types = root.firstChildElement("types");
+    QDomElement pousEl = types.firstChildElement("pous");
+    QDomNodeList pouNodes = pousEl.elementsByTagName("pou");
+
+    for (int i = 0; i < pouNodes.count(); ++i) {
+        QDomElement pe = pouNodes.at(i).toElement();
+        if (pe.isNull()) continue;
+
+        const QString name    = pe.attribute("name");
+        const QString pouType = pe.attribute("pouType"); // function/functionBlock/program
+        PouType type = PouModel::typeFromString(pouType);
+
+        // ── 解析接口变量 ──
+        QDomElement iface = pe.firstChildElement("interface");
+        QList<VariableDecl> vars;
+
+        // 遍历所有 varGroup
+        for (QDomElement grp = iface.firstChildElement();
+             !grp.isNull(); grp = grp.nextSiblingElement()) {
+            const QString cls = classStr(grp.tagName());
+            QDomNodeList varNodes = grp.elementsByTagName("variable");
+            for (int j = 0; j < varNodes.count(); ++j) {
+                QDomElement ve = varNodes.at(j).toElement();
+                VariableDecl v;
+                v.name     = ve.attribute("name");
+                v.varClass = cls;
+                v.type     = parseType(ve.firstChildElement("type"));
+                // 初始值
+                QDomElement iv = ve.firstChildElement("initialValue");
+                if (!iv.isNull())
+                    v.initValue = iv.firstChildElement("simpleValue").attribute("value");
+                // 注释 (xhtml:p CDATA)
+                QDomElement doc2 = ve.firstChildElement("documentation");
+                if (!doc2.isNull()) {
+                    QDomElement p = doc2.firstChildElement("p");
+                    if (p.isNull()) {
+                        // 带命名空间前缀
+                        QDomNodeList ps = doc2.childNodes();
+                        for (int k = 0; k < ps.count(); ++k) {
+                            QDomElement pe2 = ps.at(k).toElement();
+                            if (!pe2.isNull()) { v.comment = pe2.text().trimmed(); break; }
+                        }
+                    } else {
+                        v.comment = p.text().trimmed();
+                    }
+                }
+                vars.append(v);
+            }
+        }
+
+        // ── 解析 body ──
+        QDomElement body = pe.firstChildElement("body");
+        QDomElement bodyChild = body.firstChildElement(); // ST / IL / LD / FBD / SFC
+        const QString langTag = bodyChild.tagName().toUpper();
+
+        PouLanguage lang = PouLanguage::ST;
+        if (langTag == "ST")  lang = PouLanguage::ST;
+        else if (langTag == "IL")  lang = PouLanguage::IL;
+        else if (langTag == "LD")  lang = PouLanguage::LD;
+        else if (langTag == "FBD") lang = PouLanguage::FBD;
+        else if (langTag == "SFC") lang = PouLanguage::SFC;
+
+        PouModel* pou = new PouModel(name, type, lang);
+        pou->variables = vars;
+
+        if (lang == PouLanguage::ST || lang == PouLanguage::IL) {
+            // 文本体：从 <xhtml:p> CDATA 取内容
+            QDomNodeList ps = bodyChild.childNodes();
+            for (int j = 0; j < ps.count(); ++j) {
+                QDomElement p = ps.at(j).toElement();
+                if (!p.isNull()) {
+                    pou->code = p.text();
+                    break;
+                }
+            }
+        } else {
+            // 图形体：保存原始 XML 供渲染
+            pou->graphicalXml = bodyChild.tagName() + "\n"; // lang prefix
+            QDomDocument tmp;
+            tmp.appendChild(tmp.importNode(bodyChild, true));
+            pou->graphicalXml += tmp.toString(2);
+        }
+
+        pous.append(pou);
+    }
+
+    filePath = path;
+    m_dirty  = false;
+    emit changed();
+    return true;
+}

@@ -1,85 +1,89 @@
-// 触点 (常开/常闭)
+#include "ContactItem.h"
 
 #include <QPainter>
-#include <QInputDialog>
 #include <QStyleOptionGraphicsItem>
-
-#include "ContactItem.h"
+#include <QInputDialog>
+#include <QGraphicsSceneMouseEvent>
 
 ContactItem::ContactItem(ContactType type, QGraphicsItem *parent)
     : BaseItem(parent), m_type(type), m_tagName("??")
 {
-    // 设置工具提示，鼠标悬停时显示
-    setToolTip("PLC Contact (Click to select, Drag to move)");
+    setToolTip("Contact — Double-click to edit variable name");
 }
 
-QRectF ContactItem::boundingRect() const
-{
-    // 定义点击区域：稍微比实际画的大一点点，防止甚至包含文字区域
-    // (x, y, w, h) -> 左上角在 (0,0)，向右下延伸
-    return QRectF(0, -20, m_width, m_height + 20); 
+QRectF ContactItem::boundingRect() const {
+    // 上方留出 22px 放标签，整体宽 W 高 H+22
+    return QRectF(0, -22, W, H + 22);
 }
 
-void ContactItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
+void ContactItem::paint(QPainter *painter,
+                        const QStyleOptionGraphicsItem *option,
+                        QWidget*)
 {
-    Q_UNUSED(widget);
+    const bool selected = (option->state & QStyle::State_Selected);
+    const QColor lineColor = selected ? QColor("#0078D7") : QColor("#1A1A1A");
 
-    // 1. 设置画笔
-    // 如果被选中，线变成橙色且加粗；否则是白色（配合深色背景）
-    QColor penColor = (option->state & QStyle::State_Selected) ? QColor("#FFA500") : Qt::white;
-    painter->setPen(QPen(penColor, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    // ── 1. 引线（左/右水平线） ────────────────────────────────
+    QPen wirePen(lineColor, 2, Qt::SolidLine, Qt::FlatCap);
+    painter->setPen(wirePen);
+    painter->drawLine( 0, H/2, 15, H/2);   // 左引线
+    painter->drawLine(45, H/2, W,  H/2);   // 右引线
 
-    // 2. 绘制左右引脚 (横线)
-    // 左引脚: (0, 20) -> (20, 20)
-    painter->drawLine(0, 20, 20, 20);
-    // 右引脚: (40, 20) -> (60, 20)
-    painter->drawLine(40, 20, 60, 20);
+    // ── 2. 触点竖条（左/右竖线） ─────────────────────────────
+    QPen barPen(lineColor, 2.5, Qt::SolidLine, Qt::FlatCap);
+    painter->setPen(barPen);
+    painter->drawLine(15,  4, 15, H - 4);  // 左竖条
+    painter->drawLine(45,  4, 45, H - 4);  // 右竖条
 
-    // 3. 绘制触点符号 |  |
-    // 左竖线
-    painter->drawLine(20, 5, 20, 35);
-    // 右竖线
-    painter->drawLine(40, 5, 40, 35);
+    // ── 3. 类型标记 ──────────────────────────────────────────
+    painter->setPen(QPen(lineColor, 1.5));
+    switch (m_type) {
+    case NormalClosed:
+        // 斜杠 /
+        painter->drawLine(16, H - 5, 44, 5);
+        break;
 
-    // 4. 如果是常闭 (NC)，画中间的斜杠
-    if (m_type == NormalClosed) {
-        painter->drawLine(21, 35, 39, 5);
+    case PositiveTransition:
+    case NegativeTransition: {
+        // 中间小方框 + P / N
+        QRectF box(18, 6, 24, H - 12);
+        painter->setPen(QPen(lineColor, 1));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRect(box);
+        QFont f; f.setPixelSize(11); f.setBold(true);
+        painter->setFont(f);
+        painter->setPen(lineColor);
+        painter->drawText(box, Qt::AlignCenter,
+                          m_type == PositiveTransition ? "P" : "N");
+        break;
+    }
+    default:
+        break;
     }
 
-    // 5. 绘制标签文字 (位于元件上方)
-    // 字体颜色稍微暗一点
-    painter->setPen(QColor("#AAAAAA"));
-    QFont font = painter->font();
-    font.setPointSize(10);
-    painter->setFont(font);
-    
-    // 在 (0, -20) 到 (60, 15) 的矩形区域居中绘制文字
-    painter->drawText(QRectF(0, -20, 60, 20), Qt::AlignCenter, m_tagName);
+    // ── 4. 变量标签（元件上方居中） ──────────────────────────
+    QFont labelFont;
+    labelFont.setFamily("Consolas, Courier New");
+    labelFont.setPixelSize(11);
+    painter->setFont(labelFont);
+    painter->setPen(selected ? QColor("#0057A8") : QColor("#333333"));
+    painter->drawText(QRectF(0, -21, W, 18), Qt::AlignCenter, m_tagName);
 }
 
-QPointF ContactItem::leftPort() const {
-    // 映射局部坐标到场景坐标
-    return mapToScene(0, 20); 
-}
-
-QPointF ContactItem::rightPort() const {
-    return mapToScene(60, 20);
-}
+QPointF ContactItem::leftPort()  const { return mapToScene(0,  H/2); }
+QPointF ContactItem::rightPort() const { return mapToScene(W,  H/2); }
 
 void ContactItem::setTagName(const QString &name) {
     m_tagName = name;
-    update(); // 触发重绘
+    update();
 }
 
-void ContactItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event)
-{
-    Q_UNUSED(event);
-    
+void ContactItem::editProperties() {
     bool ok;
-    QString text = QInputDialog::getText(nullptr, "编辑触点",
-                                         "变量名称 (例如 X0.1):", QLineEdit::Normal,
-                                         m_tagName, &ok);
-    if (ok && !text.isEmpty()) {
+    const QString text = QInputDialog::getText(
+        nullptr, "Edit Contact",
+        "Variable name (e.g. Reset):",
+        QLineEdit::Normal, m_tagName, &ok);
+    if (ok && !text.isEmpty())
         setTagName(text);
-    }
 }

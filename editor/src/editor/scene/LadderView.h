@@ -1,19 +1,18 @@
 #pragma once
 #include <QGraphicsView>
+#include "LadderScene.h"  // for EditorMode
 
 class LadderView : public QGraphicsView {
     Q_OBJECT
 public:
     explicit LadderView(QWidget *parent = nullptr);
 
+public slots:
+    // 由 LadderScene::modeChanged 驱动，切换鼠标光标
+    void onModeChanged(EditorMode mode);
+
 protected:
-    // 处理鼠标滚轮缩放
     void wheelEvent(QWheelEvent *event) override;
-    
-    // 处理鼠标中键平移 (按下中键拖动)
     void mousePressEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
-
-private:
-    void setupMatrix();
 };

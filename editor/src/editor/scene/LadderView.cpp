@@ -1,4 +1,4 @@
-// 自定义视图 (处理缩放、平移)
+// 自定义视图 (处理缩放、平移、模式光标)
 
 #include "LadderView.h"
 #include <QWheelEvent>
@@ -14,9 +14,9 @@ LadderView::LadderView(QWidget *parent)
     // 2. 视口更新模式 (FullViewportUpdate 最慢但最安全，SmartViewportUpdate 适合图元多的时候)
     setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
     
-    // 3. 隐藏滚动条 (像 CAD 一样无限漫游)
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // 3. 滚动条（程序变长时可用，也支持中键平移）
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     
     // 4. 变换锚点 (缩放时以鼠标为中心)
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
@@ -69,7 +69,7 @@ void LadderView::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::MiddleButton) {
         setDragMode(QGraphicsView::RubberBandDrag);
-        
+
         QMouseEvent fakeEvent(QEvent::MouseButtonRelease,
                               event->position(),
                               event->globalPosition(),
@@ -81,5 +81,26 @@ void LadderView::mouseReleaseEvent(QMouseEvent *event)
         event->accept();
     } else {
         QGraphicsView::mouseReleaseEvent(event);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
+// onModeChanged —— 根据编辑模式切换鼠标光标
+// ──────────────────────────────────────────────────────────────
+void LadderView::onModeChanged(EditorMode mode)
+{
+    switch (mode) {
+    case Mode_Select:
+        setCursor(Qt::ArrowCursor);
+        setDragMode(QGraphicsView::RubberBandDrag);
+        break;
+    case Mode_AddWire:
+        setCursor(Qt::CrossCursor);
+        setDragMode(QGraphicsView::NoDrag);
+        break;
+    default:  // 所有放置模式
+        setCursor(Qt::CrossCursor);
+        setDragMode(QGraphicsView::NoDrag);
+        break;
     }
 }
