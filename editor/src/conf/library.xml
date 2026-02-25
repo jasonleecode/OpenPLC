@@ -1,0 +1,681 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TiZi PLC Editor — Function Library
+  Consolidated from:
+    iec_std.csv              (IEC 61131-3 standard functions)
+    Standard_Function_Blocks.xml  (SR, RS, SEMA, triggers, counters, timers)
+    Additional_Function_Blocks.xml (RTC, INTEGRAL, DERIVATIVE, PID, RAMP, HYSTERESIS)
+-->
+<library version="1">
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Standard Functions  (stateless, IEC 61131-3)
+       ═══════════════════════════════════════════════════════════════ -->
+  <category name="Standard Functions">
+
+    <!-- Type Conversion -->
+    <category name="Type Conversion">
+      <function name="*_TO_BOOL"   comment="Convert any type to BOOL"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="BOOL"/>
+      </function>
+      <function name="*_TO_BYTE"   comment="Convert any type to BYTE"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="BYTE"/>
+      </function>
+      <function name="*_TO_WORD"   comment="Convert any type to WORD"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="WORD"/>
+      </function>
+      <function name="*_TO_DWORD"  comment="Convert any type to DWORD"  extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="DWORD"/>
+      </function>
+      <function name="*_TO_LWORD"  comment="Convert any type to LWORD"  extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="LWORD"/>
+      </function>
+      <function name="*_TO_SINT"   comment="Convert any type to SINT"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="SINT"/>
+      </function>
+      <function name="*_TO_INT"    comment="Convert any type to INT"    extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="INT"/>
+      </function>
+      <function name="*_TO_DINT"   comment="Convert any type to DINT"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="DINT"/>
+      </function>
+      <function name="*_TO_LINT"   comment="Convert any type to LINT"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="LINT"/>
+      </function>
+      <function name="*_TO_USINT"  comment="Convert any type to USINT"  extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="USINT"/>
+      </function>
+      <function name="*_TO_UINT"   comment="Convert any type to UINT"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="UINT"/>
+      </function>
+      <function name="*_TO_UDINT"  comment="Convert any type to UDINT"  extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="UDINT"/>
+      </function>
+      <function name="*_TO_ULINT"  comment="Convert any type to ULINT"  extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="ULINT"/>
+      </function>
+      <function name="*_TO_REAL"   comment="Convert any type to REAL"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="REAL"/>
+      </function>
+      <function name="*_TO_LREAL"  comment="Convert any type to LREAL"  extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="LREAL"/>
+      </function>
+      <function name="*_TO_TIME"   comment="Convert any type to TIME"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="TIME"/>
+      </function>
+      <function name="*_TO_DATE"   comment="Convert any type to DATE"   extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="DATE"/>
+      </function>
+      <function name="*_TO_TOD"    comment="Convert any type to TOD"    extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="TOD"/>
+      </function>
+      <function name="*_TO_DT"     comment="Convert any type to DT"     extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="DT"/>
+      </function>
+      <function name="*_TO_STRING" comment="Convert any type to STRING" extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="STRING"/>
+      </function>
+      <function name="TRUNC"       comment="Truncate REAL/LREAL to integer" extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_INT"/>
+      </function>
+    </category>
+
+    <!-- Numerical -->
+    <category name="Numerical">
+      <function name="ABS"  comment="Absolute value"      extensible="no">
+        <input  name="IN"  type="ANY_NUM"/>
+        <output name="OUT" type="ANY_NUM"/>
+      </function>
+      <function name="SQRT" comment="Square root"         extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="LN"   comment="Natural logarithm"   extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="LOG"  comment="Base-10 logarithm"   extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="EXP"  comment="Natural exponential" extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="SIN"  comment="Sine"                extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="COS"  comment="Cosine"              extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="TAN"  comment="Tangent"             extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="ASIN" comment="Arc sine"            extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="ACOS" comment="Arc cosine"          extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="ATAN" comment="Arc tangent"         extensible="no">
+        <input  name="IN"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="ATAN2" comment="Arc tangent of y/x" extensible="no">
+        <input  name="Y"  type="ANY_REAL"/>
+        <input  name="X"  type="ANY_REAL"/>
+        <output name="OUT" type="ANY_REAL"/>
+      </function>
+      <function name="EXPT" comment="Power IN1^IN2"       extensible="no">
+        <input  name="IN1" type="ANY_NUM"/>
+        <input  name="IN2" type="ANY_NUM"/>
+        <output name="OUT" type="ANY_NUM"/>
+      </function>
+    </category>
+
+    <!-- Arithmetic -->
+    <category name="Arithmetic">
+      <function name="ADD" comment="Addition (extensible)"       extensible="yes">
+        <input  name="IN1" type="ANY_NUM"/>
+        <input  name="IN2" type="ANY_NUM"/>
+        <output name="OUT" type="ANY_NUM"/>
+      </function>
+      <function name="MUL" comment="Multiplication (extensible)" extensible="yes">
+        <input  name="IN1" type="ANY_NUM"/>
+        <input  name="IN2" type="ANY_NUM"/>
+        <output name="OUT" type="ANY_NUM"/>
+      </function>
+      <function name="SUB" comment="Subtraction"                 extensible="no">
+        <input  name="IN1" type="ANY_NUM"/>
+        <input  name="IN2" type="ANY_NUM"/>
+        <output name="OUT" type="ANY_NUM"/>
+      </function>
+      <function name="DIV" comment="Division"                    extensible="no">
+        <input  name="IN1" type="ANY_NUM"/>
+        <input  name="IN2" type="ANY_NUM"/>
+        <output name="OUT" type="ANY_NUM"/>
+      </function>
+      <function name="MOD" comment="Modulo (integer remainder)"  extensible="no">
+        <input  name="IN1" type="ANY_INT"/>
+        <input  name="IN2" type="ANY_INT"/>
+        <output name="OUT" type="ANY_INT"/>
+      </function>
+      <function name="MOVE" comment="Copy IN to OUT"             extensible="no">
+        <input  name="IN"  type="ANY"/>
+        <output name="OUT" type="ANY"/>
+      </function>
+    </category>
+
+    <!-- Bit Shift -->
+    <category name="Bit Shift">
+      <function name="SHL"  comment="Shift left"             extensible="no">
+        <input  name="IN"  type="ANY_BIT"/>
+        <input  name="N"   type="ANY_INT"/>
+        <output name="OUT" type="ANY_BIT"/>
+      </function>
+      <function name="SHR"  comment="Shift right"            extensible="no">
+        <input  name="IN"  type="ANY_BIT"/>
+        <input  name="N"   type="ANY_INT"/>
+        <output name="OUT" type="ANY_BIT"/>
+      </function>
+      <function name="ROL"  comment="Rotate left"            extensible="no">
+        <input  name="IN"  type="ANY_BIT"/>
+        <input  name="N"   type="ANY_INT"/>
+        <output name="OUT" type="ANY_BIT"/>
+      </function>
+      <function name="ROR"  comment="Rotate right"           extensible="no">
+        <input  name="IN"  type="ANY_BIT"/>
+        <input  name="N"   type="ANY_INT"/>
+        <output name="OUT" type="ANY_BIT"/>
+      </function>
+    </category>
+
+    <!-- Bitwise -->
+    <category name="Bitwise">
+      <function name="AND"  comment="Bitwise AND (extensible)" extensible="yes">
+        <input  name="IN1" type="ANY_BIT"/>
+        <input  name="IN2" type="ANY_BIT"/>
+        <output name="OUT" type="ANY_BIT"/>
+      </function>
+      <function name="OR"   comment="Bitwise OR (extensible)"  extensible="yes">
+        <input  name="IN1" type="ANY_BIT"/>
+        <input  name="IN2" type="ANY_BIT"/>
+        <output name="OUT" type="ANY_BIT"/>
+      </function>
+      <function name="XOR"  comment="Bitwise XOR (extensible)" extensible="yes">
+        <input  name="IN1" type="ANY_BIT"/>
+        <input  name="IN2" type="ANY_BIT"/>
+        <output name="OUT" type="ANY_BIT"/>
+      </function>
+      <function name="NOT"  comment="Bitwise NOT"              extensible="no">
+        <input  name="IN"  type="ANY_BIT"/>
+        <output name="OUT" type="ANY_BIT"/>
+      </function>
+    </category>
+
+    <!-- Selection -->
+    <category name="Selection">
+      <function name="SEL"  comment="Binary selection (G=0→IN0, G=1→IN1)" extensible="no">
+        <input  name="G"   type="BOOL"/>
+        <input  name="IN0" type="ANY"/>
+        <input  name="IN1" type="ANY"/>
+        <output name="OUT" type="ANY"/>
+      </function>
+      <function name="MAX"  comment="Maximum value (extensible)" extensible="yes">
+        <input  name="IN1" type="ANY"/>
+        <input  name="IN2" type="ANY"/>
+        <output name="OUT" type="ANY"/>
+      </function>
+      <function name="MIN"  comment="Minimum value (extensible)" extensible="yes">
+        <input  name="IN1" type="ANY"/>
+        <input  name="IN2" type="ANY"/>
+        <output name="OUT" type="ANY"/>
+      </function>
+      <function name="LIMIT" comment="Limit: MN ≤ IN ≤ MX"     extensible="no">
+        <input  name="MN"  type="ANY"/>
+        <input  name="IN"  type="ANY"/>
+        <input  name="MX"  type="ANY"/>
+        <output name="OUT" type="ANY"/>
+      </function>
+      <function name="MUX"   comment="Multiplexer (select INK)" extensible="yes">
+        <input  name="K"   type="ANY_INT"/>
+        <input  name="IN0" type="ANY"/>
+        <input  name="IN1" type="ANY"/>
+        <output name="OUT" type="ANY"/>
+      </function>
+    </category>
+
+    <!-- Comparison -->
+    <category name="Comparison">
+      <function name="GT"  comment="Greater than (extensible)"          extensible="yes">
+        <input  name="IN1" type="ANY"/>
+        <input  name="IN2" type="ANY"/>
+        <output name="OUT" type="BOOL"/>
+      </function>
+      <function name="GE"  comment="Greater than or equal (extensible)" extensible="yes">
+        <input  name="IN1" type="ANY"/>
+        <input  name="IN2" type="ANY"/>
+        <output name="OUT" type="BOOL"/>
+      </function>
+      <function name="EQ"  comment="Equal (extensible)"                 extensible="yes">
+        <input  name="IN1" type="ANY"/>
+        <input  name="IN2" type="ANY"/>
+        <output name="OUT" type="BOOL"/>
+      </function>
+      <function name="LT"  comment="Less than (extensible)"             extensible="yes">
+        <input  name="IN1" type="ANY"/>
+        <input  name="IN2" type="ANY"/>
+        <output name="OUT" type="BOOL"/>
+      </function>
+      <function name="LE"  comment="Less than or equal (extensible)"    extensible="yes">
+        <input  name="IN1" type="ANY"/>
+        <input  name="IN2" type="ANY"/>
+        <output name="OUT" type="BOOL"/>
+      </function>
+      <function name="NE"  comment="Not equal"                          extensible="no">
+        <input  name="IN1" type="ANY"/>
+        <input  name="IN2" type="ANY"/>
+        <output name="OUT" type="BOOL"/>
+      </function>
+    </category>
+
+    <!-- Character String -->
+    <category name="Character String">
+      <function name="LEN"    comment="String length"                      extensible="no">
+        <input  name="IN"  type="STRING"/>
+        <output name="OUT" type="INT"/>
+      </function>
+      <function name="LEFT"   comment="Left substring"                     extensible="no">
+        <input  name="IN"  type="STRING"/>
+        <input  name="L"   type="ANY_INT"/>
+        <output name="OUT" type="STRING"/>
+      </function>
+      <function name="RIGHT"  comment="Right substring"                    extensible="no">
+        <input  name="IN"  type="STRING"/>
+        <input  name="L"   type="ANY_INT"/>
+        <output name="OUT" type="STRING"/>
+      </function>
+      <function name="MID"    comment="Middle substring"                   extensible="no">
+        <input  name="IN"  type="STRING"/>
+        <input  name="L"   type="ANY_INT"/>
+        <input  name="P"   type="ANY_INT"/>
+        <output name="OUT" type="STRING"/>
+      </function>
+      <function name="CONCAT" comment="Concatenate strings (extensible)"   extensible="yes">
+        <input  name="IN1" type="STRING"/>
+        <input  name="IN2" type="STRING"/>
+        <output name="OUT" type="STRING"/>
+      </function>
+      <function name="INSERT" comment="Insert string at position"          extensible="no">
+        <input  name="IN1" type="STRING"/>
+        <input  name="IN2" type="STRING"/>
+        <input  name="P"   type="ANY_INT"/>
+        <output name="OUT" type="STRING"/>
+      </function>
+      <function name="DELETE" comment="Delete L chars at position P"       extensible="no">
+        <input  name="IN"  type="STRING"/>
+        <input  name="L"   type="ANY_INT"/>
+        <input  name="P"   type="ANY_INT"/>
+        <output name="OUT" type="STRING"/>
+      </function>
+      <function name="REPLACE" comment="Replace L chars at position P"     extensible="no">
+        <input  name="IN1" type="STRING"/>
+        <input  name="IN2" type="STRING"/>
+        <input  name="L"   type="ANY_INT"/>
+        <input  name="P"   type="ANY_INT"/>
+        <output name="OUT" type="STRING"/>
+      </function>
+      <function name="FIND"   comment="Find first occurrence of IN2 in IN1" extensible="no">
+        <input  name="IN1" type="STRING"/>
+        <input  name="IN2" type="STRING"/>
+        <output name="OUT" type="INT"/>
+      </function>
+    </category>
+
+    <!-- Time -->
+    <category name="Time">
+      <function name="ADD_TIME"    comment="Add two TIME values"              extensible="no">
+        <input  name="IN1" type="TIME"/>
+        <input  name="IN2" type="TIME"/>
+        <output name="OUT" type="TIME"/>
+      </function>
+      <function name="SUB_TIME"    comment="Subtract two TIME values"         extensible="no">
+        <input  name="IN1" type="TIME"/>
+        <input  name="IN2" type="TIME"/>
+        <output name="OUT" type="TIME"/>
+      </function>
+      <function name="MULTIME"     comment="Multiply TIME by numeric factor"  extensible="no">
+        <input  name="IN1" type="TIME"/>
+        <input  name="IN2" type="ANY_NUM"/>
+        <output name="OUT" type="TIME"/>
+      </function>
+      <function name="DIVTIME"     comment="Divide TIME by numeric factor"    extensible="no">
+        <input  name="IN1" type="TIME"/>
+        <input  name="IN2" type="ANY_NUM"/>
+        <output name="OUT" type="TIME"/>
+      </function>
+      <function name="ADD_TOD_TIME" comment="Add TIME to TOD"                 extensible="no">
+        <input  name="IN1" type="TOD"/>
+        <input  name="IN2" type="TIME"/>
+        <output name="OUT" type="TOD"/>
+      </function>
+      <function name="SUB_TOD_TIME" comment="Subtract TIME from TOD"          extensible="no">
+        <input  name="IN1" type="TOD"/>
+        <input  name="IN2" type="TIME"/>
+        <output name="OUT" type="TOD"/>
+      </function>
+      <function name="SUB_TOD"     comment="Subtract two TOD values → TIME"   extensible="no">
+        <input  name="IN1" type="TOD"/>
+        <input  name="IN2" type="TOD"/>
+        <output name="OUT" type="TIME"/>
+      </function>
+      <function name="ADD_DT_TIME" comment="Add TIME to DT"                   extensible="no">
+        <input  name="IN1" type="DT"/>
+        <input  name="IN2" type="TIME"/>
+        <output name="OUT" type="DT"/>
+      </function>
+      <function name="SUB_DT_TIME" comment="Subtract TIME from DT"            extensible="no">
+        <input  name="IN1" type="DT"/>
+        <input  name="IN2" type="TIME"/>
+        <output name="OUT" type="DT"/>
+      </function>
+      <function name="SUB_DT"      comment="Subtract two DT values → TIME"    extensible="no">
+        <input  name="IN1" type="DT"/>
+        <input  name="IN2" type="DT"/>
+        <output name="OUT" type="TIME"/>
+      </function>
+      <function name="SUB_DATE"    comment="Subtract two DATE values → TIME"  extensible="no">
+        <input  name="IN1" type="DATE"/>
+        <input  name="IN2" type="DATE"/>
+        <output name="OUT" type="TIME"/>
+      </function>
+      <function name="ADD_DATE_TIME" comment="Add TIME to DATE → DT"          extensible="no">
+        <input  name="IN1" type="DATE"/>
+        <input  name="IN2" type="TIME"/>
+        <output name="OUT" type="DT"/>
+      </function>
+      <function name="DT_TO_TOD"   comment="Extract time-of-day from DT"      extensible="no">
+        <input  name="IN"  type="DT"/>
+        <output name="OUT" type="TOD"/>
+      </function>
+      <function name="DT_TO_DATE"  comment="Extract date from DT"             extensible="no">
+        <input  name="IN"  type="DT"/>
+        <output name="OUT" type="DATE"/>
+      </function>
+    </category>
+
+  </category><!-- /Standard Functions -->
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Standard Function Blocks  (IEC 61131-3, stateful)
+       ═══════════════════════════════════════════════════════════════ -->
+  <category name="Standard Function Blocks">
+
+    <!-- Bistable -->
+    <category name="Bistable">
+      <functionBlock name="SR" comment="Set-dominant bistable (S1 has priority)">
+        <input  name="S1" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <output name="Q1" type="BOOL"/>
+      </functionBlock>
+      <functionBlock name="RS" comment="Reset-dominant bistable (R1 has priority)">
+        <input  name="S"  type="BOOL"/>
+        <input  name="R1" type="BOOL"/>
+        <output name="Q1" type="BOOL"/>
+      </functionBlock>
+      <functionBlock name="SEMA" comment="Software semaphore (mutual exclusion)">
+        <input  name="CLAIM"   type="BOOL"/>
+        <input  name="RELEASE" type="BOOL"/>
+        <output name="BUSY"    type="BOOL"/>
+      </functionBlock>
+    </category>
+
+    <!-- Edge Detection -->
+    <category name="Edge Detection">
+      <functionBlock name="R_TRIG" comment="Rising edge detector (FALSE→TRUE pulse)">
+        <input  name="CLK" type="BOOL"/>
+        <output name="Q"   type="BOOL"/>
+      </functionBlock>
+      <functionBlock name="F_TRIG" comment="Falling edge detector (TRUE→FALSE pulse)">
+        <input  name="CLK" type="BOOL"/>
+        <output name="Q"   type="BOOL"/>
+      </functionBlock>
+    </category>
+
+    <!-- Counters -->
+    <category name="Counters">
+      <functionBlock name="CTU" comment="Count-up counter">
+        <input  name="CU" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="PV" type="INT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="INT"/>
+      </functionBlock>
+      <functionBlock name="CTU_DINT" comment="Count-up counter (DINT)">
+        <input  name="CU" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="PV" type="DINT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="DINT"/>
+      </functionBlock>
+      <functionBlock name="CTU_LINT" comment="Count-up counter (LINT)">
+        <input  name="CU" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="PV" type="LINT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="LINT"/>
+      </functionBlock>
+      <functionBlock name="CTU_UDINT" comment="Count-up counter (UDINT)">
+        <input  name="CU" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="PV" type="UDINT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="UDINT"/>
+      </functionBlock>
+      <functionBlock name="CTU_ULINT" comment="Count-up counter (ULINT)">
+        <input  name="CU" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="PV" type="ULINT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="ULINT"/>
+      </functionBlock>
+      <functionBlock name="CTD" comment="Count-down counter">
+        <input  name="CD" type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="INT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="INT"/>
+      </functionBlock>
+      <functionBlock name="CTD_DINT" comment="Count-down counter (DINT)">
+        <input  name="CD" type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="DINT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="DINT"/>
+      </functionBlock>
+      <functionBlock name="CTD_LINT" comment="Count-down counter (LINT)">
+        <input  name="CD" type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="LINT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="LINT"/>
+      </functionBlock>
+      <functionBlock name="CTD_UDINT" comment="Count-down counter (UDINT)">
+        <input  name="CD" type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="UDINT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="UDINT"/>
+      </functionBlock>
+      <functionBlock name="CTD_ULINT" comment="Count-down counter (ULINT)">
+        <input  name="CD" type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="ULINT"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="CV" type="ULINT"/>
+      </functionBlock>
+      <functionBlock name="CTUD" comment="Count-up/down counter">
+        <input  name="CU" type="BOOL"/>
+        <input  name="CD" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="INT"/>
+        <output name="QU" type="BOOL"/>
+        <output name="QD" type="BOOL"/>
+        <output name="CV" type="INT"/>
+      </functionBlock>
+      <functionBlock name="CTUD_DINT" comment="Count-up/down counter (DINT)">
+        <input  name="CU" type="BOOL"/>
+        <input  name="CD" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="DINT"/>
+        <output name="QU" type="BOOL"/>
+        <output name="QD" type="BOOL"/>
+        <output name="CV" type="DINT"/>
+      </functionBlock>
+      <functionBlock name="CTUD_LINT" comment="Count-up/down counter (LINT)">
+        <input  name="CU" type="BOOL"/>
+        <input  name="CD" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="LINT"/>
+        <output name="QU" type="BOOL"/>
+        <output name="QD" type="BOOL"/>
+        <output name="CV" type="LINT"/>
+      </functionBlock>
+      <functionBlock name="CTUD_UDINT" comment="Count-up/down counter (UDINT)">
+        <input  name="CU" type="BOOL"/>
+        <input  name="CD" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="UDINT"/>
+        <output name="QU" type="BOOL"/>
+        <output name="QD" type="BOOL"/>
+        <output name="CV" type="UDINT"/>
+      </functionBlock>
+      <functionBlock name="CTUD_ULINT" comment="Count-up/down counter (ULINT)">
+        <input  name="CU" type="BOOL"/>
+        <input  name="CD" type="BOOL"/>
+        <input  name="R"  type="BOOL"/>
+        <input  name="LD" type="BOOL"/>
+        <input  name="PV" type="ULINT"/>
+        <output name="QU" type="BOOL"/>
+        <output name="QD" type="BOOL"/>
+        <output name="CV" type="ULINT"/>
+      </functionBlock>
+    </category>
+
+    <!-- Timers -->
+    <category name="Timers">
+      <functionBlock name="TP"  comment="Pulse timer: output pulse of duration PT">
+        <input  name="IN" type="BOOL"/>
+        <input  name="PT" type="TIME"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="ET" type="TIME"/>
+      </functionBlock>
+      <functionBlock name="TON" comment="On-delay timer: Q=TRUE after IN held for PT">
+        <input  name="IN" type="BOOL"/>
+        <input  name="PT" type="TIME"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="ET" type="TIME"/>
+      </functionBlock>
+      <functionBlock name="TOF" comment="Off-delay timer: Q=FALSE after IN drops for PT">
+        <input  name="IN" type="BOOL"/>
+        <input  name="PT" type="TIME"/>
+        <output name="Q"  type="BOOL"/>
+        <output name="ET" type="TIME"/>
+      </functionBlock>
+    </category>
+
+  </category><!-- /Standard Function Blocks -->
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Additional Function Blocks  (Beremiz extensions)
+       ═══════════════════════════════════════════════════════════════ -->
+  <category name="Additional Function Blocks">
+
+    <!-- Time / Calendar -->
+    <category name="Time">
+      <functionBlock name="RTC" comment="Real-time clock: outputs current date/time when PDT enabled">
+        <input  name="EN"  type="BOOL"/>
+        <input  name="PDT" type="DT"/>
+        <output name="Q"   type="BOOL"/>
+        <output name="CDT" type="DT"/>
+      </functionBlock>
+    </category>
+
+    <!-- Control -->
+    <category name="Control">
+      <functionBlock name="INTEGRAL" comment="Numerical integrator with reset and hold">
+        <input  name="RUN"    type="BOOL"/>
+        <input  name="R1"     type="BOOL"/>
+        <input  name="XIN"    type="REAL"/>
+        <input  name="X0"     type="REAL"/>
+        <input  name="CYCLE"  type="TIME"/>
+        <output name="Q"      type="BOOL"/>
+        <output name="XOUT"   type="REAL"/>
+      </functionBlock>
+      <functionBlock name="DERIVATIVE" comment="Numerical differentiator">
+        <input  name="RUN"   type="BOOL"/>
+        <input  name="XIN"   type="REAL"/>
+        <input  name="CYCLE" type="TIME"/>
+        <output name="XOUT"  type="REAL"/>
+      </functionBlock>
+      <functionBlock name="PID" comment="PID controller">
+        <input  name="AUTO"   type="BOOL"/>
+        <input  name="PV"     type="REAL"/>
+        <input  name="SP"     type="REAL"/>
+        <input  name="X0"     type="REAL"/>
+        <input  name="KP"     type="REAL"/>
+        <input  name="TR"     type="REAL"/>
+        <input  name="TD"     type="REAL"/>
+        <input  name="CYCLE"  type="TIME"/>
+        <output name="XOUT"   type="REAL"/>
+      </functionBlock>
+      <functionBlock name="RAMP" comment="Linear ramp generator with acceleration limit">
+        <input  name="RUN"    type="BOOL"/>
+        <input  name="X0"     type="REAL"/>
+        <input  name="X1"     type="REAL"/>
+        <input  name="TR"     type="TIME"/>
+        <input  name="CYCLE"  type="TIME"/>
+        <output name="BUSY"   type="BOOL"/>
+        <output name="XOUT"   type="REAL"/>
+      </functionBlock>
+      <functionBlock name="HYSTERESIS" comment="Hysteresis comparator with configurable deadband">
+        <input  name="XIN1" type="REAL"/>
+        <input  name="XIN2" type="REAL"/>
+        <input  name="EPS"  type="REAL"/>
+        <output name="Q"    type="BOOL"/>
+      </functionBlock>
+    </category>
+
+  </category><!-- /Additional Function Blocks -->
+
+</library>

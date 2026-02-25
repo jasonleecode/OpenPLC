@@ -98,6 +98,13 @@ else()
 endif()
 
 # ==========================================
+# 4b. 编译时宏：library.xml 路径（源码目录绝对路径，仅开发时使用）
+# ==========================================
+target_compile_definitions(TiZi PRIVATE
+    LIBRARY_XML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/conf/library.xml"
+)
+
+# ==========================================
 # 5. 链接库
 # ==========================================
 target_link_libraries(TiZi PRIVATE 

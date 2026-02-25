@@ -124,6 +124,8 @@ private:
     QMap<PouModel*, PlcOpenViewer*> m_sceneMap;
     // LD 工具栏模式按钮映射（Escape / signal 时同步状态）
     QMap<EditorMode, QAction*> m_ldModeActions;
+    // LD 专属工具栏动作（含前置分隔符），切换到文本视图时隐藏
+    QList<QAction*> m_ldToolActions;
 
     // 工具栏动作（需随状态动态 enable/disable）
     QAction* m_aUndo    = nullptr;

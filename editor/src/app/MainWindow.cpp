@@ -34,6 +34,8 @@
 #include <QFile>
 #include <QMenu>
 #include <QTimer>
+#include <QDomDocument>
+#include <QCoreApplication>
 #include <QFrame>
 #include <QEvent>
 #include <QApplication>
@@ -442,7 +444,12 @@ void MainWindow::setupToolBar()
 
     // ══════════════════════════════════════════════════════════
     // 第6组：LD / FBD 编辑元件（互斥模式按钮）
+    // 注意：这组工具只在激活图形视图（LD/FBD/SFC）时可见
     // ══════════════════════════════════════════════════════════
+
+    // 前置分隔符也归入 m_ldToolActions，一起随视图类型显示/隐藏
+    m_ldToolActions << tb->addSeparator();
+
     QActionGroup* modeGroup = new QActionGroup(this);
     modeGroup->setExclusive(true);
 
@@ -466,19 +473,24 @@ void MainWindow::setupToolBar()
     };
 
     for (const auto& e : ldTools) {
+        // 各子组之间插入分隔符（分隔符也要归入隐藏列表）
+        if (e.mode == Mode_AddContact_N || e.mode == Mode_AddCoil_R ||
+            e.mode == Mode_AddFuncBlock)
+            m_ldToolActions << tb->addSeparator();
+
         QAction* act = tb->addAction(makeLdIcon(e.iconType), e.tooltip);
         act->setCheckable(true);
         act->setChecked(e.checked);
         modeGroup->addAction(act);
         m_ldModeActions[e.mode] = act;
+        m_ldToolActions << act;
         connect(act, &QAction::triggered, [this, e](){
             if (m_scene) m_scene->setMode(e.mode);
         });
-        // 各子组之间插入分隔符
-        if (e.mode == Mode_AddContact_N || e.mode == Mode_AddCoil_R ||
-            e.mode == Mode_AddFuncBlock)
-            tb->insertSeparator(act);
     }
+
+    // 初始状态：没有任何视图激活，先隐藏全部 LD 工具
+    for (QAction* a : m_ldToolActions) a->setVisible(false);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -519,6 +531,37 @@ void MainWindow::setupProjectPanel()
 // ============================================================
 // 右侧停靠栏：函数库 + 调试器
 // ============================================================
+// Helper: recursively populate tree from <category>/<function>/<functionBlock> DOM
+static void populateLibraryNode(QTreeWidgetItem* parent,
+                                 const QDomElement& elem,
+                                 const QIcon& folderIcon,
+                                 const QIcon& fnIcon,
+                                 const QIcon& fbIcon)
+{
+    for (QDomElement child = elem.firstChildElement();
+         !child.isNull(); child = child.nextSiblingElement())
+    {
+        const QString tag = child.tagName();
+        if (tag == "category") {
+            auto* node = new QTreeWidgetItem(parent, QStringList{child.attribute("name")});
+            node->setIcon(0, folderIcon);
+            populateLibraryNode(node, child, folderIcon, fnIcon, fbIcon);
+        } else if (tag == "function") {
+            auto* node = new QTreeWidgetItem(parent, QStringList{child.attribute("name")});
+            node->setIcon(0, fnIcon);
+            const QString comment = child.attribute("comment");
+            if (!comment.isEmpty()) node->setToolTip(0, comment);
+            node->setData(0, Qt::UserRole, "function");
+        } else if (tag == "functionBlock") {
+            auto* node = new QTreeWidgetItem(parent, QStringList{child.attribute("name")});
+            node->setIcon(0, fbIcon);
+            const QString comment = child.attribute("comment");
+            if (!comment.isEmpty()) node->setToolTip(0, comment);
+            node->setData(0, Qt::UserRole, "functionBlock");
+        }
+    }
+}
+
 void MainWindow::setupLibraryPanel()
 {
     QDockWidget* dock = new QDockWidget("Library", this);
@@ -545,17 +588,51 @@ void MainWindow::setupLibraryPanel()
     m_libraryTree->setStyle(new TreeBranchStyle());
 
     const QIcon folderIcon(":/images/FOLDER.png");
-    const QStringList categories = {
-        "Standard function", "Additional function", "Type conversion",
-        "Numerical", "Arithmetic", "Bit-shift", "Bitwise",
-        "Selection", "Comparison", "Character string", "Time",
-        "User-defined POU"
+    const QIcon fnIcon(":/images/FUNCTION.png");   // function icon
+    const QIcon fbIcon(":/images/BLOCK.png");       // function block icon
+
+    // Load library.xml from the application bundle or source conf directory
+    // At runtime, look alongside the executable; fall back to source tree
+    const QStringList searchPaths = {
+        QCoreApplication::applicationDirPath() + "/conf/library.xml",
+        QCoreApplication::applicationDirPath() + "/../Resources/conf/library.xml",
+        QString(LIBRARY_XML_PATH)   // injected by CMake at compile time
     };
-    for (const QString& cat : categories) {
-        auto* item = new QTreeWidgetItem(m_libraryTree, QStringList{cat});
-        item->setIcon(0, folderIcon);
-        item->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+
+    QDomDocument libDoc;
+    for (const QString& p : searchPaths) {
+        QFile f(p);
+        if (f.open(QFile::ReadOnly) && libDoc.setContent(&f))
+            break;
+        libDoc.clear();
     }
+
+    if (!libDoc.isNull()) {
+        QDomElement root = libDoc.documentElement(); // <library>
+        for (QDomElement cat = root.firstChildElement("category");
+             !cat.isNull(); cat = cat.nextSiblingElement("category"))
+        {
+            auto* topItem = new QTreeWidgetItem(m_libraryTree, QStringList{cat.attribute("name")});
+            topItem->setIcon(0, folderIcon);
+            populateLibraryNode(topItem, cat, folderIcon, fnIcon, fbIcon);
+        }
+    } else {
+        // Fallback: minimal static list if XML not found
+        const QStringList fallback = {
+            "Standard Functions", "Standard Function Blocks", "Additional Function Blocks"
+        };
+        for (const QString& cat : fallback) {
+            auto* item = new QTreeWidgetItem(m_libraryTree, QStringList{cat});
+            item->setIcon(0, folderIcon);
+        }
+    }
+
+    // User-defined POUs node (always present)
+    {
+        auto* userNode = new QTreeWidgetItem(m_libraryTree, QStringList{"User-defined POU"});
+        userNode->setIcon(0, folderIcon);
+    }
+
     libLay->addWidget(m_libraryTree);
     libTabs->addTab(libWidget, "Library");
     libTabs->addTab(new QWidget(), "Debugger");
@@ -622,12 +699,23 @@ void MainWindow::setupCentralArea()
     m_mdiArea->setTabsMovable(true);
     m_mdiArea->setDocumentMode(true);  // 去掉子窗口边框，纯标签外观
 
-    // 激活不同子窗口时同步 m_scene（任何图形语言都有 scene）
+    // 激活不同子窗口时：同步 m_scene，并根据视图类型显示/隐藏 LD 工具栏
     connect(m_mdiArea, &QMdiArea::subWindowActivated,
             this, [this](QMdiSubWindow* sw) {
-        if (!sw) { m_scene = nullptr; return; }
+        if (!sw) {
+            m_scene = nullptr;
+            for (QAction* a : m_ldToolActions) a->setVisible(false);
+            return;
+        }
         PouModel* pou = m_subWinPouMap.value(sw, nullptr);
         m_scene = pou ? m_sceneMap.value(pou, nullptr) : nullptr;
+
+        // 图形语言（LD / FBD / SFC）显示 LD 工具栏，文本语言（ST / IL）隐藏
+        const bool isGraphical = pou &&
+            (pou->language == PouLanguage::LD  ||
+             pou->language == PouLanguage::FBD ||
+             pou->language == PouLanguage::SFC);
+        for (QAction* a : m_ldToolActions) a->setVisible(isGraphical);
     });
 
     setCentralWidget(m_mdiArea);
