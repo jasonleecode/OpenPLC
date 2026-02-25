@@ -4,6 +4,7 @@
 #include <QTextStream>
 #include <QDomDocument>
 #include <QDomElement>
+#include <QDateTime>
 
 ProjectModel::ProjectModel(QObject* parent)
     : QObject(parent), projectName("Untitled")
@@ -27,8 +28,21 @@ void ProjectModel::clear() {
     pous.clear();
     projectName = "Untitled";
     filePath.clear();
+    // metadata
+    author.clear();
+    companyName.clear();
+    productVersion  = "1";
+    description.clear();
+    creationDateTime.clear();
+    modificationDateTime.clear();
+    // build settings
+    targetType = "Linux";
+    compiler   = "gcc";
+    cflags.clear();
+    linker     = "gcc";
+    ldflags.clear();
     m_dirty = false;
-    m_sourcePlcOpen  = QDomDocument();
+    m_sourcePlcOpen   = QDomDocument();
     m_isPlcOpenSource = false;
 }
 
@@ -111,11 +125,18 @@ bool ProjectModel::saveTiZiNative(const QString& path) {
         }
         pouElem.appendChild(varsElem);
 
-        // code (text content, CDATA to preserve whitespace/special chars)
-        QDomElement codeElem = doc.createElement("code");
-        if (!pou->code.isEmpty())
-            codeElem.appendChild(doc.createCDATASection(pou->code));
-        pouElem.appendChild(codeElem);
+        // graphical body（LD/FBD/SFC）或文本 code（ST/IL）
+        if (!pou->graphicalXml.isEmpty()) {
+            // 保存图形 XML（"LD\n<LD>...</LD>" 格式）
+            QDomElement graphElem = doc.createElement("graphical");
+            graphElem.appendChild(doc.createCDATASection(pou->graphicalXml));
+            pouElem.appendChild(graphElem);
+        } else {
+            QDomElement codeElem = doc.createElement("code");
+            if (!pou->code.isEmpty())
+                codeElem.appendChild(doc.createCDATASection(pou->code));
+            pouElem.appendChild(codeElem);
+        }
 
         root.appendChild(pouElem);
     }
@@ -136,6 +157,39 @@ bool ProjectModel::saveTiZiNative(const QString& path) {
 bool ProjectModel::savePlcOpen(const QString& path) {
     // 以原始文档为基础进行克隆
     QDomDocument doc = m_sourcePlcOpen.cloneNode(true).toDocument();
+    QDomElement  docRoot = doc.documentElement();
+
+    // ── 更新 fileHeader ──────────────────────────────────────
+    QDomElement fhEl = docRoot.firstChildElement("fileHeader");
+    if (!fhEl.isNull()) {
+        fhEl.setAttribute("companyName",    companyName);
+        fhEl.setAttribute("author",         author);
+        fhEl.setAttribute("productVersion", productVersion);
+    }
+
+    // ── 更新 contentHeader ───────────────────────────────────
+    QDomElement chEl = docRoot.firstChildElement("contentHeader");
+    if (!chEl.isNull()) {
+        chEl.setAttribute("name",    projectName);
+        chEl.setAttribute("comment", description);
+        chEl.setAttribute("modificationDateTime",
+                          QDateTime::currentDateTime().toString(Qt::ISODate));
+    }
+
+    // ── 更新/新增 TiZiBuild ──────────────────────────────────
+    QDomElement buildEl = docRoot.firstChildElement("TiZiBuild");
+    if (buildEl.isNull()) {
+        buildEl = doc.createElement("TiZiBuild");
+        // 插在 <instances> 之前（或末尾）
+        QDomElement inst = docRoot.firstChildElement("instances");
+        if (!inst.isNull()) docRoot.insertBefore(buildEl, inst);
+        else docRoot.appendChild(buildEl);
+    }
+    buildEl.setAttribute("targetType", targetType);
+    buildEl.setAttribute("compiler",   compiler);
+    buildEl.setAttribute("cflags",     cflags);
+    buildEl.setAttribute("linker",     linker);
+    buildEl.setAttribute("ldflags",    ldflags);
 
     QDomNodeList pouNodes = doc.elementsByTagName("pou");
 
@@ -246,6 +300,10 @@ bool ProjectModel::loadFromFile(const QString& path) {
         PouModel* pou  = new PouModel(name, type, lang);
         pou->description = pe.firstChildElement("description").text();
         pou->code        = pe.firstChildElement("code").text();
+        // 图形内容（LD/FBD/SFC），存在 <graphical> 元素中
+        QDomElement graphElem = pe.firstChildElement("graphical");
+        if (!graphElem.isNull())
+            pou->graphicalXml = graphElem.text();
 
         QDomNodeList varNodes = pe.firstChildElement("variables").elementsByTagName("var");
         for (int j = 0; j < varNodes.count(); ++j) {
@@ -274,9 +332,28 @@ bool ProjectModel::loadPlcOpenXml(const QDomDocument& doc, const QString& path)
 {
     QDomElement root = doc.documentElement(); // <project>
 
-    // 项目名来自 <contentHeader name="...">
+    // ── fileHeader ──
+    QDomElement fh = root.firstChildElement("fileHeader");
+    companyName    = fh.attribute("companyName");
+    author         = fh.attribute("author");
+    productVersion = fh.attribute("productVersion", "1");
+    creationDateTime = fh.attribute("creationDateTime");
+
+    // ── contentHeader ──
     QDomElement hdr = root.firstChildElement("contentHeader");
-    projectName = hdr.attribute("name", "Imported Project");
+    projectName          = hdr.attribute("name", "Imported Project");
+    modificationDateTime = hdr.attribute("modificationDateTime");
+    description          = hdr.attribute("comment");
+
+    // ── TiZiBuild (TiZi 扩展，可选) ──
+    QDomElement build = root.firstChildElement("TiZiBuild");
+    if (!build.isNull()) {
+        targetType = build.attribute("targetType", "Linux");
+        compiler   = build.attribute("compiler",   "gcc");
+        cflags     = build.attribute("cflags");
+        linker     = build.attribute("linker",     "gcc");
+        ldflags    = build.attribute("ldflags");
+    }
 
     // 辅助函数：把 PLCopen varClass 组名映射到我们的字符串
     auto classStr = [](const QString& tagName) -> QString {

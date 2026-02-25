@@ -28,6 +28,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QComboBox>
+#include <QSpinBox>
 #include <QPushButton>
 #include <QPlainTextEdit>
 #include <QFont>
@@ -36,8 +37,10 @@
 #include <QTimer>
 #include <QDomDocument>
 #include <QCoreApplication>
+#include <QUndoStack>
 #include <QFrame>
 #include <QEvent>
+#include <QGroupBox>
 #include <QApplication>
 
 #include "../editor/scene/LadderScene.h"
@@ -68,9 +71,7 @@ MainWindow::MainWindow(QWidget *parent)
     setupStatusBar();
 
     // 加载样式表
-    QFile styleFile(":/dark_theme.qss");
-    if (styleFile.open(QFile::ReadOnly))
-        qApp->setStyleSheet(QString::fromUtf8(styleFile.readAll()));
+    applyTheme(":/light_theme.qss");   // 默认浅色主题
 
     // 创建默认项目
     m_project = new ProjectModel(this);
@@ -190,6 +191,189 @@ void MainWindow::setupMenuBar()
         if (auto* w = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget())) w->paste();
     }, QKeySequence::Paste);
 
+    // ── PLC 菜单 ─────────────────────────────────────────────
+    QMenu* plcMenu = menuBar()->addMenu("PLC(&P)");
+
+    // 编译组
+    auto* aBuildActive = plcMenu->addAction(
+        QIcon(":/images/Build.png"), "Build Active Resource\tCtrl+B");
+    aBuildActive->setShortcut(QKeySequence("Ctrl+B"));
+    connect(aBuildActive, &QAction::triggered, this, &MainWindow::buildProject);
+
+    auto* aRebuild = plcMenu->addAction(
+        QIcon(":/images/Clean.png"), "Rebuild Active Resource");
+    connect(aRebuild, &QAction::triggered, this, [this]{
+        m_consoleEdit->clear();
+        buildProject();
+    });
+
+    plcMenu->addSeparator();
+
+    // 连接组
+    auto* aConn = plcMenu->addAction(
+        QIcon(":/images/Connect.png"), "Connections...");
+    connect(aConn, &QAction::triggered, this, &MainWindow::connectToPlc);
+
+    auto* aOnline = plcMenu->addAction(
+        QIcon(":/images/Connect.png"), "Online");
+    aOnline->setCheckable(true);
+    connect(aOnline, &QAction::triggered, this, &MainWindow::connectToPlc);
+
+    plcMenu->addSeparator();
+
+    // 传输/控制组
+    auto* aDownload = plcMenu->addAction(
+        QIcon(":/images/Transfer.png"), "Download...");
+    connect(aDownload, &QAction::triggered, this, [this]{
+        if (m_connState != PlcConnState::Connected) {
+            QMessageBox::warning(this, "Not Connected",
+                                 "Please connect to a PLC first.");
+            return;
+        }
+        QMessageBox::information(this, "Download",
+            "Program download is not yet implemented.\n"
+            "Build the project first, then transfer via your PLC runtime.");
+    });
+
+    auto* aColdStart = plcMenu->addAction("Cold Start");
+    connect(aColdStart, &QAction::triggered, this, [this]{
+        if (m_connState != PlcConnState::Connected) {
+            QMessageBox::warning(this, "Not Connected", "Please connect to a PLC first.");
+            return;
+        }
+        setPlcRunState(PlcRunState::Stopped);
+        statusBar()->showMessage("Cold start requested.", 3000);
+    });
+
+    auto* aHotStart = plcMenu->addAction("Hot Start");
+    connect(aHotStart, &QAction::triggered, this, [this]{
+        if (m_connState != PlcConnState::Connected) {
+            QMessageBox::warning(this, "Not Connected", "Please connect to a PLC first.");
+            return;
+        }
+        setPlcRunState(PlcRunState::Running);
+        statusBar()->showMessage("Hot start requested.", 3000);
+    });
+
+    auto* aPlcStop = plcMenu->addAction(
+        QIcon(":/images/Stop.png"), "Stop");
+    connect(aPlcStop, &QAction::triggered, this, [this]{
+        if (m_connState != PlcConnState::Connected) {
+            QMessageBox::warning(this, "Not Connected", "Please connect to a PLC first.");
+            return;
+        }
+        setPlcRunState(PlcRunState::Stopped);
+        statusBar()->showMessage("PLC stopped.", 3000);
+    });
+
+    plcMenu->addSeparator();
+
+    // 调试组
+    auto* aMonitor = plcMenu->addAction(
+        QIcon(":/images/Debug.png"), "Monitor / Edit");
+    aMonitor->setCheckable(true);
+    connect(aMonitor, &QAction::triggered, this, [this](bool checked){
+        if (m_connState != PlcConnState::Connected) {
+            QMessageBox::warning(this, "Not Connected", "Please connect to a PLC first.");
+            return;
+        }
+        statusBar()->showMessage(
+            checked ? "Monitor mode enabled." : "Monitor mode disabled.", 3000);
+    });
+
+    auto* aBrowser = plcMenu->addAction(
+        QIcon(":/images/IO_VARIABLE.png"), "Browser");
+    connect(aBrowser, &QAction::triggered, this, [this]{
+        QMessageBox::information(this, "Variable Browser",
+            "Variable browser is not yet implemented.");
+    });
+
+    plcMenu->addSeparator();
+
+    auto* aPlcInfo = plcMenu->addAction(
+        QIcon(":/images/LOG_INFO.png"), "PLC Info...");
+    connect(aPlcInfo, &QAction::triggered, this, [this]{
+        if (m_connState != PlcConnState::Connected) {
+            QMessageBox::information(this, "PLC Info",
+                "Not connected to any PLC.\n"
+                "Use Connections... to establish a connection first.");
+            return;
+        }
+        QMessageBox::information(this, "PLC Info",
+            QString("URI: %1\nStatus: Connected\nRuntime: OpenPLC Runtime")
+                .arg(m_plcUri));
+    });
+
+    // ── Extras 菜单 ──────────────────────────────────────────
+    QMenu* extrasMenu = menuBar()->addMenu("Extras(&X)");
+
+    // Tools 子菜单
+    QMenu* toolsMenu = extrasMenu->addMenu("Tools");
+    auto* aDriverInstall = toolsMenu->addAction("Driver Install...");
+    connect(aDriverInstall, &QAction::triggered, this, [this]{
+        const QString path = QFileDialog::getOpenFileName(
+            this, "Select Driver Package", QString(),
+            "Driver Packages (*.cab *.zip);;All Files (*)");
+        if (!path.isEmpty())
+            QMessageBox::information(this, "Driver Install",
+                QString("Driver installation is not yet implemented.\nSelected: %1").arg(path));
+    });
+
+    auto* aLicenseEditor = extrasMenu->addAction("License Editor");
+    connect(aLicenseEditor, &QAction::triggered, this, [this]{
+        QMessageBox::information(this, "License Editor",
+            "License editor is not yet implemented.");
+    });
+
+    extrasMenu->addSeparator();
+
+    auto* aOptions = extrasMenu->addAction(
+        QIcon(":/images/CONFIGURATION.png"), "Options...");
+    connect(aOptions, &QAction::triggered, this, [this]{
+        QDialog dlg(this);
+        dlg.setWindowTitle("Options");
+        dlg.setMinimumWidth(400);
+
+        QFormLayout form(&dlg);
+        form.setContentsMargins(12, 12, 12, 8);
+        form.setSpacing(8);
+
+        // 编译器路径
+        auto* compEdit = new QLineEdit(
+            m_project ? m_project->compiler : "gcc");
+        form.addRow("Compiler:", compEdit);
+
+        auto* linkerEdit = new QLineEdit(
+            m_project ? m_project->linker : "gcc");
+        form.addRow("Linker:", linkerEdit);
+
+        // 编辑器字体
+        auto* fontSizeSpin = new QSpinBox();
+        fontSizeSpin->setRange(7, 24);
+        fontSizeSpin->setValue(
+            m_consoleEdit ? m_consoleEdit->font().pointSize() : 10);
+        form.addRow("Editor Font Size:", fontSizeSpin);
+
+        auto* btns = new QDialogButtonBox(
+            QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+            Qt::Horizontal, &dlg);
+        form.addRow(btns);
+        connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+        if (dlg.exec() == QDialog::Accepted && m_project) {
+            m_project->compiler = compEdit->text().trimmed();
+            m_project->linker   = linkerEdit->text().trimmed();
+            m_project->markDirty();
+            // 应用字体到所有代码编辑器
+            const int sz = fontSizeSpin->value();
+            QFont f("Courier New", sz);
+            if (m_consoleEdit) m_consoleEdit->setFont(f);
+            statusBar()->showMessage("Options saved.", 3000);
+        }
+    });
+
+    // ── Display 菜单 ─────────────────────────────────────────
     QMenu* displayMenu = menuBar()->addMenu("Display(&D)");
     displayMenu->addAction(makeLdIcon("zoom_in"),  "Zoom In",
                            this, &MainWindow::zoomIn,  QKeySequence(Qt::CTRL | Qt::Key_Equal));
@@ -197,6 +381,33 @@ void MainWindow::setupMenuBar()
                            this, &MainWindow::zoomOut, QKeySequence(Qt::CTRL | Qt::Key_Minus));
     displayMenu->addAction(makeLdIcon("fit"),      "Fit to Window",
                            this, &MainWindow::zoomFit, QKeySequence(Qt::CTRL | Qt::Key_0));
+
+    displayMenu->addSeparator();
+
+    // ── 主题切换 ──────────────────────────────────────────────
+    QMenu* themeMenu = displayMenu->addMenu("Theme");
+
+    auto* aLightTheme = themeMenu->addAction("Light");
+    aLightTheme->setCheckable(true);
+    aLightTheme->setChecked(true);
+
+    auto* aDarkTheme = themeMenu->addAction("Dark");
+    aDarkTheme->setCheckable(true);
+    aDarkTheme->setChecked(false);
+
+    // 互斥：切到浅色
+    connect(aLightTheme, &QAction::triggered, this, [this, aLightTheme, aDarkTheme]() {
+        applyTheme(":/light_theme.qss");
+        aLightTheme->setChecked(true);
+        aDarkTheme->setChecked(false);
+    });
+
+    // 互斥：切到深色
+    connect(aDarkTheme, &QAction::triggered, this, [this, aLightTheme, aDarkTheme]() {
+        applyTheme(":/dark_theme.qss");
+        aDarkTheme->setChecked(true);
+        aLightTheme->setChecked(false);
+    });
 
     QMenu* helpMenu = menuBar()->addMenu("Help(&H)");
     helpMenu->addAction("About", this, [this](){
@@ -353,13 +564,19 @@ void MainWindow::setupToolBar()
     m_aRedo = tb->addAction(makeLdIcon("redo"), "Redo  [Ctrl+Y]");
     m_aUndo->setShortcut(QKeySequence::Undo);
     m_aRedo->setShortcut(QKeySequence::Redo);
-    // 将 Undo/Redo 转发到当前获得焦点的文本控件
-    connect(m_aUndo, &QAction::triggered, this, []{
-        if (auto* w = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget()))
+    m_aUndo->setEnabled(false);
+    m_aRedo->setEnabled(false);
+    // 优先委托图形场景 undo stack，无场景时转发给聚焦的文本控件
+    connect(m_aUndo, &QAction::triggered, this, [this]{
+        if (m_scene && m_scene->undoStack()->canUndo())
+            m_scene->undoStack()->undo();
+        else if (auto* w = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget()))
             w->undo();
     });
-    connect(m_aRedo, &QAction::triggered, this, []{
-        if (auto* w = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget()))
+    connect(m_aRedo, &QAction::triggered, this, [this]{
+        if (m_scene && m_scene->undoStack()->canRedo())
+            m_scene->undoStack()->redo();
+        else if (auto* w = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget()))
             w->redo();
     });
     tb->addSeparator();
@@ -587,9 +804,9 @@ void MainWindow::setupLibraryPanel()
     m_libraryTree->setHeaderHidden(true);
     m_libraryTree->setStyle(new TreeBranchStyle());
 
-    const QIcon folderIcon(":/images/FOLDER.png");
-    const QIcon fnIcon(":/images/FUNCTION.png");   // function icon
-    const QIcon fbIcon(":/images/BLOCK.png");       // function block icon
+    const QIcon folderIcon(":/images/BLOCK.png");
+    const QIcon fnIcon(":/images/BLOCK.png");
+    const QIcon fbIcon(":/images/BLOCK.png");
 
     // Load library.xml from the application bundle or source conf directory
     // At runtime, look alongside the executable; fall back to source tree
@@ -636,6 +853,8 @@ void MainWindow::setupLibraryPanel()
     libLay->addWidget(m_libraryTree);
     libTabs->addTab(libWidget, "Library");
     libTabs->addTab(new QWidget(), "Debugger");
+    libTabs->tabBar()->setExpanding(false);  // 让标签页左对齐
+    libTabs->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
 
     dock->setWidget(libTabs);
     dock->setMinimumWidth(190);
@@ -684,7 +903,7 @@ void MainWindow::setupConsolePanel()
 
     // 底部面板只占中央区域，不延伸到左/右停靠栏下方
     setCorner(Qt::BottomLeftCorner,  Qt::LeftDockWidgetArea);
-    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+    setCorner(Qt::BottomRightCorner, Qt::BottomDockWidgetArea);
 }
 
 // ============================================================
@@ -702,9 +921,15 @@ void MainWindow::setupCentralArea()
     // 激活不同子窗口时：同步 m_scene，并根据视图类型显示/隐藏 LD 工具栏
     connect(m_mdiArea, &QMdiArea::subWindowActivated,
             this, [this](QMdiSubWindow* sw) {
+        // 断开旧的 canUndo/canRedo 连接
+        QObject::disconnect(m_undoConn);
+        QObject::disconnect(m_redoConn);
+
         if (!sw) {
             m_scene = nullptr;
             for (QAction* a : m_ldToolActions) a->setVisible(false);
+            m_aUndo->setEnabled(false);
+            m_aRedo->setEnabled(false);
             return;
         }
         PouModel* pou = m_subWinPouMap.value(sw, nullptr);
@@ -716,6 +941,19 @@ void MainWindow::setupCentralArea()
              pou->language == PouLanguage::FBD ||
              pou->language == PouLanguage::SFC);
         for (QAction* a : m_ldToolActions) a->setVisible(isGraphical);
+
+        // 根据视图类型连接 Undo/Redo 使能信号
+        if (isGraphical && m_scene) {
+            QUndoStack* us = m_scene->undoStack();
+            m_aUndo->setEnabled(us->canUndo());
+            m_aRedo->setEnabled(us->canRedo());
+            m_undoConn = connect(us, &QUndoStack::canUndoChanged, m_aUndo, &QAction::setEnabled);
+            m_redoConn = connect(us, &QUndoStack::canRedoChanged, m_aRedo, &QAction::setEnabled);
+        } else {
+            // 文本编辑器：始终启用（QPlainTextEdit 内建 undo/redo）
+            m_aUndo->setEnabled(true);
+            m_aRedo->setEnabled(true);
+        }
     });
 
     setCentralWidget(m_mdiArea);
@@ -733,6 +971,7 @@ void MainWindow::rebuildProjectTree()
     auto* root = new QTreeWidgetItem(m_projectTree,
                                       QStringList{m_project->projectName});
     root->setIcon(0, QIcon(":/images/PROJECT.png"));
+    root->setData(0, Qt::UserRole, QString("project-root"));  // 标记根节点
     root->setExpanded(true);
 
     // 语言图标映射
@@ -782,6 +1021,13 @@ void MainWindow::rebuildProjectTree()
 void MainWindow::onTreeDoubleClicked(QTreeWidgetItem* item, int /*column*/)
 {
     if (!item) return;
+
+    // 项目根节点 → 打开项目属性面板
+    if (item->data(0, Qt::UserRole).toString() == "project-root") {
+        openProjectProperties();
+        return;
+    }
+
     void* ptr = item->data(0, Qt::UserRole).value<void*>();
     if (!ptr) return;
     openPouTab(static_cast<PouModel*>(ptr));
@@ -890,6 +1136,126 @@ void MainWindow::closeAllPouTabs()
 }
 
 // ============================================================
+// 项目属性面板（单例）
+// ============================================================
+void MainWindow::openProjectProperties()
+{
+    if (!m_project) return;
+
+    // 若已打开则激活
+    if (m_projPropSubWin) {
+        m_mdiArea->setActiveSubWindow(m_projPropSubWin);
+        return;
+    }
+
+    QWidget* w = createProjectPropertiesWidget();
+    m_projPropSubWin = m_mdiArea->addSubWindow(w);
+    m_projPropSubWin->setWindowTitle(
+        QString("Project — %1").arg(m_project->projectName));
+    m_projPropSubWin->setWindowIcon(QIcon(":/images/PROJECT.png"));
+    m_projPropSubWin->setAttribute(Qt::WA_DeleteOnClose);
+    m_projPropSubWin->resize(480, 560);
+    m_projPropSubWin->show();
+
+    // 关闭时清空指针
+    connect(m_projPropSubWin, &QObject::destroyed, this,
+            [this]{ m_projPropSubWin = nullptr; });
+}
+
+QWidget* MainWindow::createProjectPropertiesWidget()
+{
+    auto* w      = new QWidget();
+    auto* topLay = new QVBoxLayout(w);
+    topLay->setContentsMargins(12, 12, 12, 12);
+    topLay->setSpacing(10);
+
+    // ── Project Properties ────────────────────────────────────
+    auto* projGroup = new QGroupBox("Project Properties");
+    auto* projForm  = new QFormLayout(projGroup);
+    projForm->setContentsMargins(8, 10, 8, 10);
+    projForm->setSpacing(6);
+
+    auto* nameEdit    = new QLineEdit(m_project->projectName);
+    auto* authorEdit  = new QLineEdit(m_project->author);
+    auto* compEdit    = new QLineEdit(m_project->companyName);
+    auto* verEdit     = new QLineEdit(m_project->productVersion);
+    auto* descEdit    = new QPlainTextEdit(m_project->description);
+    descEdit->setFixedHeight(68);
+    auto* createdLbl  = new QLabel(m_project->creationDateTime.isEmpty()
+                                    ? "(unknown)" : m_project->creationDateTime);
+    auto* modLbl      = new QLabel(m_project->modificationDateTime.isEmpty()
+                                    ? "(unknown)" : m_project->modificationDateTime);
+    createdLbl->setStyleSheet("color:#666;");
+    modLbl->setStyleSheet("color:#666;");
+
+    projForm->addRow("Project Name:",  nameEdit);
+    projForm->addRow("Author:",        authorEdit);
+    projForm->addRow("Company:",       compEdit);
+    projForm->addRow("Version:",       verEdit);
+    projForm->addRow("Description:",   descEdit);
+    projForm->addRow("Created:",       createdLbl);
+    projForm->addRow("Last Modified:", modLbl);
+
+    // ── Build ────────────────────────────────────────────────
+    auto* buildGroup = new QGroupBox("Build");
+    auto* buildForm  = new QFormLayout(buildGroup);
+    buildForm->setContentsMargins(8, 10, 8, 10);
+    buildForm->setSpacing(6);
+
+    auto* targetCombo  = new QComboBox();
+    targetCombo->addItems({"Linux", "Mac", "Windows", "Embedded"});
+    targetCombo->setCurrentText(m_project->targetType);
+    auto* compilerEdit = new QLineEdit(m_project->compiler);
+    auto* cflagsEdit   = new QLineEdit(m_project->cflags);
+    auto* linkerEdit   = new QLineEdit(m_project->linker);
+    auto* ldflagsEdit  = new QLineEdit(m_project->ldflags);
+
+    buildForm->addRow("Target Type:", targetCombo);
+    buildForm->addRow("Compiler:",    compilerEdit);
+    buildForm->addRow("CFLAGS:",      cflagsEdit);
+    buildForm->addRow("Linker:",      linkerEdit);
+    buildForm->addRow("LDFLAGS:",     ldflagsEdit);
+
+    topLay->addWidget(projGroup);
+    topLay->addWidget(buildGroup);
+    topLay->addStretch();
+
+    // ── 连接：字段变化 → 更新 ProjectModel ───────────────────
+    connect(nameEdit, &QLineEdit::textChanged, this, [this](const QString& v) {
+        m_project->projectName = v;
+        m_project->markDirty();
+        updateWindowTitle();
+        if (m_projPropSubWin)
+            m_projPropSubWin->setWindowTitle(QString("Project — %1").arg(v));
+        // 同步项目树根节点文字
+        if (m_projectTree->topLevelItemCount() > 0)
+            m_projectTree->topLevelItem(0)->setText(0, v);
+    });
+    connect(authorEdit,  &QLineEdit::textChanged, this,
+            [this](const QString& v){ m_project->author = v; m_project->markDirty(); });
+    connect(compEdit,    &QLineEdit::textChanged, this,
+            [this](const QString& v){ m_project->companyName = v; m_project->markDirty(); });
+    connect(verEdit,     &QLineEdit::textChanged, this,
+            [this](const QString& v){ m_project->productVersion = v; m_project->markDirty(); });
+    connect(descEdit, &QPlainTextEdit::textChanged, this, [this, descEdit]{
+        m_project->description = descEdit->toPlainText();
+        m_project->markDirty();
+    });
+    connect(targetCombo, &QComboBox::currentTextChanged, this,
+            [this](const QString& v){ m_project->targetType = v; m_project->markDirty(); });
+    connect(compilerEdit, &QLineEdit::textChanged, this,
+            [this](const QString& v){ m_project->compiler = v; m_project->markDirty(); });
+    connect(cflagsEdit,  &QLineEdit::textChanged, this,
+            [this](const QString& v){ m_project->cflags = v; m_project->markDirty(); });
+    connect(linkerEdit,  &QLineEdit::textChanged, this,
+            [this](const QString& v){ m_project->linker = v; m_project->markDirty(); });
+    connect(ldflagsEdit, &QLineEdit::textChanged, this,
+            [this](const QString& v){ m_project->ldflags = v; m_project->markDirty(); });
+
+    return w;
+}
+
+// ============================================================
 // 创建 POU 编辑器控件
 // ============================================================
 QWidget* MainWindow::createPouEditorWidget(PouModel* pou)
@@ -915,8 +1281,13 @@ QWidget* MainWindow::createPouEditorWidget(PouModel* pou)
             scene = new PlcOpenViewer(this);
             if (!pou->graphicalXml.isEmpty())
                 scene->loadFromXmlString(pou->graphicalXml);
-            else
-                scene->initEmpty();
+            else {
+                // 传入语言字符串，scene 据此初始化正确的 body DOM
+                QString langStr = "LD";
+                if (pou->language == PouLanguage::FBD) langStr = "FBD";
+                else if (pou->language == PouLanguage::SFC) langStr = "SFC";
+                scene->initEmpty(langStr);
+            }
             m_sceneMap[pou] = scene;
         }
 
@@ -1553,4 +1924,56 @@ void MainWindow::updateWindowTitle()
     setWindowTitle(QString("%1%2 — TiZi PLC Editor")
                        .arg(m_project->projectName)
                        .arg(dirty));
+}
+
+// ============================================================
+// 主题切换
+// ============================================================
+void MainWindow::applyTheme(const QString& qrcPath)
+{
+    QFile f(qrcPath);
+    if (!f.open(QFile::ReadOnly)) return;
+
+    qApp->setStyleSheet(QString::fromUtf8(f.readAll()));
+    m_currentTheme = qrcPath;
+
+    // 同步 QPalette —— macOS 上 QTreeWidget viewport 直接读 palette，不读 QSS
+    const bool dark = qrcPath.contains("dark_theme");
+    QPalette pal = qApp->palette();
+    if (dark) {
+        pal.setColor(QPalette::Window,          QColor("#1E1E1E"));
+        pal.setColor(QPalette::WindowText,      QColor("#D4D4D4"));
+        pal.setColor(QPalette::Base,            QColor("#252526"));
+        pal.setColor(QPalette::AlternateBase,   QColor("#1E1E1E"));
+        pal.setColor(QPalette::Text,            QColor("#D4D4D4"));
+        pal.setColor(QPalette::Button,          QColor("#3C3C3C"));
+        pal.setColor(QPalette::ButtonText,      QColor("#D4D4D4"));
+        pal.setColor(QPalette::Highlight,       QColor("#094771"));
+        pal.setColor(QPalette::HighlightedText, QColor("#FFFFFF"));
+        pal.setColor(QPalette::ToolTipBase,     QColor("#252526"));
+        pal.setColor(QPalette::ToolTipText,     QColor("#D4D4D4"));
+        pal.setColor(QPalette::PlaceholderText, QColor("#6E6E6E"));
+    } else {
+        pal.setColor(QPalette::Window,          QColor("#F0F0F0"));
+        pal.setColor(QPalette::WindowText,      QColor("#1A1A1A"));
+        pal.setColor(QPalette::Base,            QColor("#FFFFFF"));
+        pal.setColor(QPalette::AlternateBase,   QColor("#F7F9FC"));
+        pal.setColor(QPalette::Text,            QColor("#1A1A1A"));
+        pal.setColor(QPalette::Button,          QColor("#E8E8E8"));
+        pal.setColor(QPalette::ButtonText,      QColor("#1A1A1A"));
+        pal.setColor(QPalette::Highlight,       QColor("#0078D7"));
+        pal.setColor(QPalette::HighlightedText, QColor("#FFFFFF"));
+        pal.setColor(QPalette::ToolTipBase,     QColor("#FFFFFF"));
+        pal.setColor(QPalette::ToolTipText,     QColor("#1A1A1A"));
+        pal.setColor(QPalette::PlaceholderText, QColor("#999999"));
+    }
+    qApp->setPalette(pal);
+
+    // 强制所有顶层及子控件刷新 palette（macOS 有时需要显式通知）
+    for (QWidget* w : qApp->allWidgets())
+        w->setPalette(pal);
+
+    // 通知所有已打开的图形场景重绘背景
+    for (PlcOpenViewer* scene : m_sceneMap)
+        scene->update();
 }

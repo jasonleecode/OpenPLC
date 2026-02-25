@@ -82,6 +82,8 @@ set(PROJECT_SOURCES
 
     # 工具类
     src/utils/StHighlighter.h
+    src/utils/UndoStack.h
+    src/utils/UndoStack.cpp
 
     # 资源文件
     resources/tizi.qrc

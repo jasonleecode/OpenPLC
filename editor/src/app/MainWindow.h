@@ -2,6 +2,7 @@
 #include <QMainWindow>
 #include <QMap>
 #include <QIcon>
+#include <QMetaObject>
 
 #include "../core/models/ProjectModel.h"
 #include "../editor/scene/LadderScene.h"     // EditorMode 枚举
@@ -73,13 +74,18 @@ private:
     // ---- 子窗口管理 ----
     void openPouTab(PouModel* pou);
     void closeAllPouTabs();
+    void openProjectProperties();            // 打开项目属性面板（单例）
 
     // ---- POU 编辑器工厂 ----
     QWidget* createPouEditorWidget(PouModel* pou);
     QWidget* createVarDeclWidget(PouModel* pou);
+    QWidget* createProjectPropertiesWidget();    // 项目属性面板
 
     // ---- 窗口标题 ----
     void updateWindowTitle();
+
+    // ---- 主题 ----
+    void applyTheme(const QString& qrcPath);  // 加载并应用 QSS
 
     // ---- 视图缩放 ----
     LadderView* activeView() const;   // 当前活跃的图形视图（可能为 nullptr）
@@ -118,6 +124,9 @@ private:
     QLabel* m_stateLabel   = nullptr;       // 运行状态文字
     QLabel* m_uriLabel     = nullptr;       // PLC 地址
 
+    // 项目属性面板（单例子窗口）
+    QMdiSubWindow* m_projPropSubWin = nullptr;
+
     // 每个 MDI 子窗口对应的 PouModel
     QMap<QMdiSubWindow*, PouModel*> m_subWinPouMap;
     // 每个 PouModel 对应的图形场景（LD / FBD / SFC，关闭后保留复用）
@@ -130,6 +139,10 @@ private:
     // 工具栏动作（需随状态动态 enable/disable）
     QAction* m_aUndo    = nullptr;
     QAction* m_aRedo    = nullptr;
+    // 当前图形场景 undo stack 的 canUndo/canRedo 连接（切换窗口时断开重连）
+    QMetaObject::Connection m_undoConn;
+    QMetaObject::Connection m_redoConn;
+    QString  m_currentTheme;         // 当前主题 QRC 路径
     QAction* m_aConnect = nullptr;   // 连接/断开（图标随状态切换）
     QAction* m_aRun     = nullptr;
     QAction* m_aStop    = nullptr;

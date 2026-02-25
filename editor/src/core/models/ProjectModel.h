@@ -12,9 +12,24 @@ public:
     explicit ProjectModel(QObject* parent = nullptr);
     ~ProjectModel() override;
 
-    QString projectName;   // 项目名称
+    QString projectName;   // 项目名称（contentHeader @name）
     QString filePath;      // 保存路径（空 = 尚未保存）
     QList<PouModel*> pous; // 所有 POU 列表
+
+    // ── 项目元数据 ──────────────────────────────────────────────
+    QString author;               // fileHeader @author
+    QString companyName;          // fileHeader @companyName
+    QString productVersion = "1"; // fileHeader @productVersion
+    QString description;          // contentHeader @comment
+    QString creationDateTime;     // fileHeader @creationDateTime（只读）
+    QString modificationDateTime; // contentHeader @modificationDateTime（保存时自动更新）
+
+    // ── 构建设置（TiZiBuild 扩展元素）──────────────────────────
+    QString targetType = "Linux";
+    QString compiler   = "gcc";
+    QString cflags;
+    QString linker     = "gcc";
+    QString ldflags;
 
     bool isDirty() const { return m_dirty; }
     void markDirty();

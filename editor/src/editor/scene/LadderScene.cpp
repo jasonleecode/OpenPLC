@@ -1,5 +1,6 @@
 #include "LadderScene.h"
 
+#include <QApplication>
 #include <QPainter>
 #include <QGraphicsSceneMouseEvent>
 #include <QKeyEvent>
@@ -19,7 +20,8 @@ LadderScene::LadderScene(QObject *parent)
                  RightRailX + 100,
                  RailBottomY + 60);
 
-    m_backgroundColor = QColor("#FFFFFF");
+    // 颜色在 drawBackground 里从 palette 动态读取，这里仅保留字段初始化
+    m_backgroundColor = QApplication::palette().base().color();
     m_gridColor       = QColor("#F0F0F0");
     m_gridColorFine   = QColor("#E0E0E0");
 }
@@ -34,11 +36,14 @@ void LadderScene::setMode(EditorMode mode) {
 // ══════════════════════════════════════════════════════════════
 void LadderScene::drawBackground(QPainter *painter, const QRectF &rect)
 {
-    painter->fillRect(rect, m_backgroundColor);
+    // 动态读取当前主题背景色
+    const QColor bg  = QApplication::palette().base().color();
+    const bool dark  = bg.lightnessF() <= 0.5;
+    painter->fillRect(rect, bg);
 
     // ── 1. 轻量点阵背景（间距 20px） ─────────────────────────
     {
-        painter->setPen(QPen(QColor("#CCCCCC"), 1.0));
+        painter->setPen(QPen(dark ? QColor("#3A3A3A") : QColor("#CCCCCC"), 1.0));
         const int dot = 20;
         int fx = (int)rect.left()  - ((int)rect.left()  % dot);
         int fy = (int)rect.top()   - ((int)rect.top()   % dot);

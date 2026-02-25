@@ -240,9 +240,7 @@ Beremiz 支持：
 
 TiZi 只能保存自己的 `.tizi` 格式（本质上还是 PLCopen XML），没有与其他 IDE 互操作的导出路径。
 
-### 5.3 没有版本控制友好格式
 
-Beremiz 的项目格式设计为 VCS 友好（XML 格式化，最小 diff）。TiZi 的 `.tizi` 文件在每次保存时会重写整个文件，包括生成时间戳，导致 git diff 噪声很大。
 
 ---
 

@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
+        <file>light_theme.qss</file>
         <file>dark_theme.qss</file>
         <file>images/about_brz_logo.png</file>
         <file>images/aboutlogo.png</file>
