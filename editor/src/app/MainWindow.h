@@ -14,6 +14,7 @@ class QTreeWidgetItem;
 class QPlainTextEdit;
 class QLabel;
 class PlcOpenViewer;
+class LadderView;
 
 // ─────────────────────────────────────────────────────────────
 // PLC 连接状态
@@ -79,6 +80,12 @@ private:
 
     // ---- 窗口标题 ----
     void updateWindowTitle();
+
+    // ---- 视图缩放 ----
+    LadderView* activeView() const;   // 当前活跃的图形视图（可能为 nullptr）
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
 
     // ---- 工具栏辅助 ----
     static QIcon makeLdIcon(const QString& type, int size = 24);

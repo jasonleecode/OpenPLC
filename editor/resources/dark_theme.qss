@@ -109,10 +109,6 @@ QTreeWidget::item:selected {
     background-color: #0078D7;
     color: #FFFFFF;
 }
-/* ── 折叠/展开三角：让 Qt 使用平台原生渲染 ── */
-QTreeWidget::branch {
-    background: transparent;
-}
 
 /* ---- MDI 区域 ---- */
 QMdiArea {

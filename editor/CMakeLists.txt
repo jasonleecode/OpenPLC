@@ -65,6 +65,8 @@ set(PROJECT_SOURCES
     src/editor/items/WireItem.cpp
     src/core/compiler/CodeGenerator.h
     src/core/compiler/CodeGenerator.cpp
+    src/core/compiler/StGenerator.h
+    src/core/compiler/StGenerator.cpp
 
     # Editor 元件（新增）
     src/editor/items/FunctionBlockItem.h

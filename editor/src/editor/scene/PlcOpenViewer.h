@@ -1,9 +1,12 @@
 #pragma once
 #include <QGraphicsScene>
 #include <QDomElement>
+#include <QDomDocument>
 #include <QMap>
+#include <QList>
 #include <QPointF>
 #include <QString>
+#include <QTimer>
 
 // EditorMode 定义在 LadderScene.h，两个场景共用同一套工具枚举
 #include "LadderScene.h"
@@ -16,6 +19,7 @@ class BaseItem;
 //   • loadFromXmlString() — 从 PLCopen XML 导入 LD/FBD/SFC
 //   • initEmpty()         — 新建空白画布（新 LD/FBD 程序）
 //   • setMode()           — 工具栏驱动编辑模式
+//   • toXmlString()       — 场景 → 更新后的 PLCopen body XML
 // ─────────────────────────────────────────────────────────────
 class PlcOpenViewer : public QGraphicsScene
 {
@@ -27,6 +31,9 @@ public:
     void loadFromXmlString(const QString& xmlBody);
     // 初始化为空的可编辑画布（新建 LD / FBD 程序时使用）
     void initEmpty();
+
+    // 序列化场景 → "FBD\n<FBD>...</FBD>"（同步 item 位置后返回）
+    QString toXmlString();
 
     // ── 编辑模式（供工具栏连接）──────────────────────────────
     void       setMode(EditorMode mode);
@@ -59,10 +66,34 @@ private:
                                 int fontSize = 9);
     QPointF snapToNearestPort(const QPointF& pos, qreal radius) const;
 
-    // localId → output port 场景坐标（用于连线起点）
+    // ── 动态导线 ─────────────────────────────────────────────
+    struct FbdConn {
+        int    srcId;    QString srcParam;  // 源输出端口 localId + 参数名
+        int    dstId;    QString dstParam;  // 目标输入端口 localId + 参数名
+        QGraphicsPathItem* wire = nullptr;  // 可视导线（由 scene 管理生命周期）
+    };
+    void    updateAllWires();
+    void    syncPositionsToDoc();       // item 坐标 → m_bodyDoc <position>
+    void    syncWirePathsToDoc();       // 导线折点 → m_bodyDoc <connection>/<position>
+
+    QPointF getOutputPortScene(int lid, const QString& param) const;
+    QPointF getInputPortScene (int lid, const QString& param) const;
+    static QDomElement findElemById(const QDomElement& root, int lid);
+
+    // localId → output port 场景坐标（加载时的快照，用于 SFC/兼容）
     QMap<int, QPointF>               m_outPort;
     QMap<int, QMap<QString,QPointF>> m_namedOutPort;
-    QMap<int, QGraphicsItem*>        m_items;
+    QMap<int, QGraphicsItem*>        m_items;   // localId → scene item
+
+    // FBD/LD 导线连接表
+    QList<FbdConn> m_connections;
+    bool           m_updatingWires = false;
+    QTimer*        m_wireTimer     = nullptr;
+    int            m_nextLocalId   = 10000;   // 新增 item 的 localId 起始值
+
+    // 可修改的 body DOM（用于序列化）
+    QString      m_bodyLanguage;   // "FBD" / "LD" / "SFC"
+    QDomDocument m_bodyDoc;
 
     // ── 编辑状态 ──────────────────────────────────────────────
     EditorMode m_mode         = Mode_Select;

@@ -39,7 +39,16 @@ signals:
     void pouRemoved(const QString& name);
 
 private:
-    bool m_dirty = false;
+    bool         m_dirty           = false;
+    QDomDocument m_sourcePlcOpen;             // 原始 PLCopen 文档（若从 PLCopen 加载）
+    bool         m_isPlcOpenSource = false;   // 是否为 PLCopen 格式源文件
+
     // PLCopen XML 格式（Beremiz 兼容）导入
     bool loadPlcOpenXml(const QDomDocument& doc, const QString& path);
+    // PLCopen XML 格式保存（Beremiz 兼容）
+    bool savePlcOpen(const QString& path);
+    // TiZi 自有格式保存
+    bool saveTiZiNative(const QString& path);
+    // 更新 ST/IL body 的 CDATA 内容
+    static void updateStBody(QDomDocument& doc, QDomElement& pouElem, const QString& code);
 };

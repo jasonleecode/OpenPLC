@@ -1,0 +1,31 @@
+<LPCOpenCfg>
+	<symbol options="default" name="varChipConfigDir" value="${varChipLibSrcDir}/config"/>
+	<symbol name="varCPUCore" value="m0plus"/>
+	<module name="core_${varCPUCore}"/>
+	<template section="import" name="${varChipLibName}_inc1" tool="xpresso">
+		<copy>../chip_common/error.h</copy>
+		<copy>../chip_common/stopwatch.h</copy>
+		<copy>../chip_common/iap.h</copy>
+	</template>
+	<template section="import" name="${varChipLibName}_src1" tool="xpresso">
+		<copy>../chip_common/iap.c</copy>
+	</template>
+	<template section="filelist" name="lpc_chip_${prjChipFamily}" tool="xpresso">
+		<import src="${varChipConfigDir}" dest="inc">
+			<copy>cmsis.h</copy>
+			<copy>sys_config.h</copy>
+		</import>
+	</template>
+	<template section="import" name="${varExampleEnable}_startup" tool="xpresso">
+		<copy>crp.c</copy>
+		<copy>mtb.c</copy>
+	</template>
+	<template section="setting" name="${varExampleEnable}_cdef" tool="xpresso">
+		<value>__MTB_BUFFER_SIZE=128</value>
+	</template>
+	<template section="cfglist" tool="xpresso" name="${varExampleEnable}">
+		<setting id="linker.crp">
+			<value>true</value>
+		</setting>
+	</template>
+</LPCOpenCfg>

@@ -26,6 +26,9 @@ public:
 
     void editProperties() override;
 
+    // 设置从 PLCopen XML 读取的实际像素尺寸（已乘 kScale）
+    void setExplicitSize(qreal w, qreal h);
+
     enum { Type = UserType + 1 };
     int type() const override { return Type; }
 
@@ -35,4 +38,6 @@ public:
 private:
     ContactType m_type;
     QString     m_tagName;
+    qreal       m_w = W;
+    qreal       m_h = H;
 };

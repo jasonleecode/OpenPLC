@@ -28,6 +28,8 @@ void ProjectModel::clear() {
     projectName = "Untitled";
     filePath.clear();
     m_dirty = false;
+    m_sourcePlcOpen  = QDomDocument();
+    m_isPlcOpenSource = false;
 }
 
 // -------------------------------------------------------
@@ -65,9 +67,16 @@ bool ProjectModel::pouNameExists(const QString& name) const {
 }
 
 // -------------------------------------------------------
-// XML 保存
+// XML 保存（路由到 PLCopen 或 TiZi 自有格式）
 // -------------------------------------------------------
 bool ProjectModel::saveToFile(const QString& path) {
+    if (m_isPlcOpenSource)
+        return savePlcOpen(path);
+    return saveTiZiNative(path);
+}
+
+// ── TiZi 自有格式保存 ────────────────────────────────────────
+bool ProjectModel::saveTiZiNative(const QString& path) {
     QDomDocument doc;
     QDomProcessingInstruction pi = doc.createProcessingInstruction(
         "xml", "version=\"1.0\" encoding=\"UTF-8\"");
@@ -121,6 +130,81 @@ bool ProjectModel::saveToFile(const QString& path) {
     filePath = path;
     m_dirty  = false;
     return true;
+}
+
+// ── PLCopen XML 格式保存（Beremiz 兼容）────────────────────────
+bool ProjectModel::savePlcOpen(const QString& path) {
+    // 以原始文档为基础进行克隆
+    QDomDocument doc = m_sourcePlcOpen.cloneNode(true).toDocument();
+
+    QDomNodeList pouNodes = doc.elementsByTagName("pou");
+
+    for (PouModel* pou : pous) {
+        // 找到 name 匹配的 <pou> 节点
+        for (int i = 0; i < pouNodes.count(); ++i) {
+            QDomElement pn = pouNodes.at(i).toElement();
+            if (pn.attribute("name") != pou->name) continue;
+
+            QDomElement bodyElem = pn.firstChildElement("body");
+            if (bodyElem.isNull()) break;
+
+            if (!pou->graphicalXml.isEmpty()) {
+                // 图形体（LD/FBD/SFC）：替换 <body> 的第一子节点
+                int nl = pou->graphicalXml.indexOf('\n');
+                const QString bodyXml = pou->graphicalXml.mid(nl + 1);
+                QDomDocument bdoc;
+                if (bdoc.setContent(bodyXml)) {
+                    QDomElement newBodyChild = bdoc.documentElement();
+                    // 清空旧子节点
+                    while (!bodyElem.firstChild().isNull())
+                        bodyElem.removeChild(bodyElem.firstChild());
+                    // 导入并追加新节点
+                    QDomNode imported = doc.importNode(newBodyChild, true);
+                    bodyElem.appendChild(imported);
+                }
+            } else if (!pou->code.isEmpty()) {
+                // 文本体（ST/IL）：更新 CDATA 内容
+                updateStBody(doc, pn, pou->code);
+            }
+            break;
+        }
+    }
+
+    QFile f(path);
+    if (!f.open(QFile::WriteOnly | QFile::Text)) return false;
+    QTextStream ts(&f);
+    ts.setEncoding(QStringConverter::Utf8);
+    // doc.toString() 已包含原文档的 <?xml ...?> 声明，不需要手动补充
+    ts << doc.toString(2);
+
+    filePath = path;
+    m_dirty  = false;
+    return true;
+}
+
+// ── 更新 ST/IL body 中的 CDATA 内容 ──────────────────────────
+void ProjectModel::updateStBody(QDomDocument& doc,
+                                 QDomElement&  pouElem,
+                                 const QString& code)
+{
+    QDomElement body = pouElem.firstChildElement("body");
+    if (body.isNull()) return;
+    QDomElement lang = body.firstChildElement(); // <ST> or <IL>
+    if (lang.isNull()) return;
+
+    // 找到第一个子元素（可能是 xhtml:p 或 p）
+    QDomElement pElem;
+    QDomNodeList children = lang.childNodes();
+    for (int k = 0; k < children.count(); ++k) {
+        pElem = children.at(k).toElement();
+        if (!pElem.isNull()) break;
+    }
+
+    if (!pElem.isNull()) {
+        while (!pElem.firstChild().isNull())
+            pElem.removeChild(pElem.firstChild());
+        pElem.appendChild(doc.createCDATASection(code));
+    }
 }
 
 // -------------------------------------------------------
@@ -299,6 +383,10 @@ bool ProjectModel::loadPlcOpenXml(const QDomDocument& doc, const QString& path)
 
         pous.append(pou);
     }
+
+    // 保留完整的原始 PLCopen 文档，供 savePlcOpen 使用
+    m_sourcePlcOpen   = doc;
+    m_isPlcOpenSource = true;
 
     filePath = path;
     m_dirty  = false;

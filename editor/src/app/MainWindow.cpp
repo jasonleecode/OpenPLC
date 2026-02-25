@@ -42,10 +42,13 @@
 #include "../editor/scene/LadderView.h"
 #include "../editor/scene/PlcOpenViewer.h"
 #include "../utils/StHighlighter.h"
+#include "../utils/TreeBranchStyle.h"
 #include "../core/compiler/CodeGenerator.h"
+#include "../core/compiler/StGenerator.h"
 
 // PlcOpenViewer 兼作所有图形语言（LD/FBD/SFC）的统一编辑器
 
+// ============================================================
 // ============================================================
 
 MainWindow::MainWindow(QWidget *parent)
@@ -76,7 +79,23 @@ MainWindow::MainWindow(QWidget *parent)
     updateWindowTitle();
 }
 
-MainWindow::~MainWindow() {}
+MainWindow::~MainWindow()
+{
+    // ── 析构顺序问题修复 ────────────────────────────────────────
+    // C++ 析构顺序：① 析构体执行 → ② 成员变量析构 → ③ 基类析构
+    // Qt 在 ③（~QObject）中才删除子对象（deleteChildren）。
+    //
+    // 问题：m_subWinPouMap（值类型 QMap，成员变量）在 ② 被销毁，
+    // 但 ③ 删除 MDI 子窗口时触发 destroyed 信号，lambda 仍试图
+    // 访问 m_subWinPouMap.remove(sw) → use-after-destruction → SIGSEGV。
+    //
+    // 修复：在 ① 中提前断开所有子窗口的 destroyed 信号，让 ② 之后
+    // 的子窗口删除不再触发 lambda。
+    if (m_mdiArea) {
+        for (QMdiSubWindow* sw : m_mdiArea->subWindowList())
+            sw->disconnect(this);
+    }
+}
 
 // ============================================================
 // 默认示例项目
@@ -170,9 +189,12 @@ void MainWindow::setupMenuBar()
     }, QKeySequence::Paste);
 
     QMenu* displayMenu = menuBar()->addMenu("Display(&D)");
-    displayMenu->addAction("Zoom In");
-    displayMenu->addAction("Zoom Out");
-    displayMenu->addAction("Fit to Window");
+    displayMenu->addAction(makeLdIcon("zoom_in"),  "Zoom In",
+                           this, &MainWindow::zoomIn,  QKeySequence(Qt::CTRL | Qt::Key_Equal));
+    displayMenu->addAction(makeLdIcon("zoom_out"), "Zoom Out",
+                           this, &MainWindow::zoomOut, QKeySequence(Qt::CTRL | Qt::Key_Minus));
+    displayMenu->addAction(makeLdIcon("fit"),      "Fit to Window",
+                           this, &MainWindow::zoomFit, QKeySequence(Qt::CTRL | Qt::Key_0));
 
     QMenu* helpMenu = menuBar()->addMenu("Help(&H)");
     helpMenu->addAction("About", this, [this](){
@@ -214,6 +236,10 @@ QIcon MainWindow::makeLdIcon(const QString& type, int sz)
         { "coil",       ":/images/add_coil.png"    },
         { "fb",         ":/images/add_block.png"   },
         { "wire",       ":/images/add_wire.png"    },
+        // 缩放
+        { "zoom_in",    ":/images/zoom_in.png"     },
+        { "zoom_out",   ":/images/zoom_out.png"    },
+        { "fit",        ":/images/zoom_fit.png"    },
     };
     if (s_pngMap.contains(type))
         return QIcon(s_pngMap[type]);
@@ -258,6 +284,34 @@ QIcon MainWindow::makeLdIcon(const QString& type, int sz)
         QFont f; f.setPixelSize(sz/3); f.setBold(true); p.setFont(f);
         p.drawText(QRectF(al+4, bt, ar-al-8, bb-bt),
                    Qt::AlignCenter, type == "set" ? "S" : "R");
+
+    } else if (type == "zoom_in" || type == "zoom_out") {
+        // 放大镜圆圈
+        const int r = sz * 5 / 14;
+        const int ox = sz * 4 / 10, oy = sz * 4 / 10;
+        p.setPen(QPen(QColor("#2A2A2A"), 1.8));
+        p.drawEllipse(QPoint(ox, oy), r, r);
+        // 手柄
+        int hx1 = ox + r * 7/10, hy1 = oy + r * 7/10;
+        p.drawLine(hx1, hy1, sz-3, sz-3);
+        // + 或 -
+        int cross = r * 5 / 8;
+        p.drawLine(ox - cross, oy, ox + cross, oy);
+        if (type == "zoom_in")
+            p.drawLine(ox, oy - cross, ox, oy + cross);
+
+    } else if (type == "fit") {
+        // 四角箭头：表示 Fit to Window
+        p.setPen(QPen(QColor("#2A2A2A"), 1.5));
+        int m = 3, a = 5;
+        // 左上角
+        p.drawLine(m, m+a, m, m); p.drawLine(m, m, m+a, m);
+        // 右上角
+        p.drawLine(sz-m, m+a, sz-m, m); p.drawLine(sz-m, m, sz-m-a, m);
+        // 左下角
+        p.drawLine(m, sz-m-a, m, sz-m); p.drawLine(m, sz-m, m+a, sz-m);
+        // 右下角
+        p.drawLine(sz-m, sz-m-a, sz-m, sz-m); p.drawLine(sz-m, sz-m, sz-m-a, sz-m);
     }
 
     return QIcon(pm);
@@ -457,6 +511,7 @@ void MainWindow::setupProjectPanel()
     connect(m_projectTree, &QTreeWidget::customContextMenuRequested,
             this, &MainWindow::onTreeContextMenu);
 
+    m_projectTree->setStyle(new TreeBranchStyle());
     dock->setWidget(m_projectTree);
     addDockWidget(Qt::LeftDockWidgetArea, dock);
 }
@@ -487,6 +542,7 @@ void MainWindow::setupLibraryPanel()
     m_libraryTree = new QTreeWidget();
     m_libraryTree->setObjectName("libraryTree");
     m_libraryTree->setHeaderHidden(true);
+    m_libraryTree->setStyle(new TreeBranchStyle());
 
     const QIcon folderIcon(":/images/FOLDER.png");
     const QStringList categories = {
@@ -521,6 +577,7 @@ void MainWindow::setupConsolePanel()
 
     m_consoleTabs = new QTabWidget();
     m_consoleTabs->setObjectName("consoleTabs");
+    m_consoleTabs->tabBar()->setExpanding(false);  // 标签页左对齐，不拉伸填满
 
     // Search
     QWidget* searchWidget = new QWidget();
@@ -547,6 +604,10 @@ void MainWindow::setupConsolePanel()
     dock->setWidget(m_consoleTabs);
     addDockWidget(Qt::BottomDockWidgetArea, dock);
     resizeDocks({dock}, {160}, Qt::Vertical);
+
+    // 底部面板只占中央区域，不延伸到左/右停靠栏下方
+    setCorner(Qt::BottomLeftCorner,  Qt::LeftDockWidgetArea);
+    setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
 }
 
 // ============================================================
@@ -595,11 +656,34 @@ void MainWindow::rebuildProjectTree()
         { PouLanguage::SFC, ":/images/SFC.png" },
     };
 
-    for (PouModel* pou : m_project->pous) {
-        auto* item = new QTreeWidgetItem(root, QStringList{pou->name});
+    auto addPouItem = [&](QTreeWidgetItem* parent, PouModel* pou) {
+        auto* item = new QTreeWidgetItem(parent, QStringList{pou->name});
         item->setIcon(0, QIcon(s_langIcon.value(pou->language, ":/images/Unknown.png")));
         item->setData(0, Qt::UserRole, QVariant::fromValue(static_cast<void*>(pou)));
+    };
+
+    // 三次遍历，按 Beremiz 惯例排列：Function → Function Blocks（分组）→ Program
+    // Pass 1: Functions（直接挂根节点）
+    for (PouModel* pou : m_project->pous)
+        if (pou->pouType == PouType::Function)
+            addPouItem(root, pou);
+
+    // Pass 2: Function Blocks（放入可折叠子分组）
+    QTreeWidgetItem* fbGroup = nullptr;
+    for (PouModel* pou : m_project->pous) {
+        if (pou->pouType != PouType::FunctionBlock) continue;
+        if (!fbGroup) {
+            fbGroup = new QTreeWidgetItem(root, QStringList{"Function Blocks"});
+            fbGroup->setIcon(0, QIcon(":/images/FOLDER.png"));
+            fbGroup->setExpanded(true);
+        }
+        addPouItem(fbGroup, pou);
     }
+
+    // Pass 3: Programs（直接挂根节点）
+    for (PouModel* pou : m_project->pous)
+        if (pou->pouType == PouType::Program)
+            addPouItem(root, pou);
 
     m_projectTree->expandAll();
 }
@@ -753,11 +837,14 @@ QWidget* MainWindow::createPouEditorWidget(PouModel* pou)
 
         if (!m_scene) m_scene = scene;
 
-        // 延迟 fitInView，等 view 完成布局后再缩放
-        QTimer::singleShot(0, view, [view, scene](){
+        // 延迟 fitInView，等 MDI 子窗口完成布局后再缩放（0ms 有时不够）
+        QTimer::singleShot(50, view, [view, scene](){
             QRectF r = scene->itemsBoundingRect().adjusted(-40, -40, 40, 40);
             if (r.isEmpty())
                 r = QRectF(0, 0, 800, 600);
+            // 确保 sceneRect 覆盖全部内容（防止大型图形被裁剪）
+            if (!scene->sceneRect().contains(r))
+                scene->setSceneRect(r.adjusted(-40, -40, 40, 40));
             view->fitInView(r, Qt::KeepAspectRatio);
         });
 
@@ -1005,6 +1092,19 @@ void MainWindow::openProject()
     statusBar()->showMessage(QString("Opened: %1").arg(path), 3000);
 }
 
+// ── 保存前将所有打开的图形场景同步到 PouModel ─────────────────
+static void syncScenesBeforeSave(const QMap<PouModel*, PlcOpenViewer*>& sceneMap)
+{
+    for (auto it = sceneMap.cbegin(); it != sceneMap.cend(); ++it) {
+        PouModel*      pou   = it.key();
+        PlcOpenViewer* scene = it.value();
+        if (!scene) continue;
+        QString xml = scene->toXmlString();
+        if (!xml.isEmpty())
+            pou->graphicalXml = xml;
+    }
+}
+
 void MainWindow::saveProject()
 {
     if (!m_project) return;
@@ -1012,6 +1112,7 @@ void MainWindow::saveProject()
         saveProjectAs();
         return;
     }
+    syncScenesBeforeSave(m_sceneMap);
     if (!m_project->saveToFile(m_project->filePath)) {
         QMessageBox::critical(this, "Save Error",
             QString("Failed to save:\n%1").arg(m_project->filePath));
@@ -1029,6 +1130,7 @@ void MainWindow::saveProjectAs()
         "TiZi Project (*.tizi);;XML Files (*.xml);;All Files (*)");
     if (path.isEmpty()) return;
 
+    syncScenesBeforeSave(m_sceneMap);
     if (!m_project->saveToFile(path)) {
         QMessageBox::critical(this, "Save Error",
             QString("Failed to save:\n%1").arg(path));
@@ -1039,36 +1141,59 @@ void MainWindow::saveProjectAs()
 }
 
 // ============================================================
-// 编译：对当前活跃图形场景生成 C 代码，显示到控制台
+// 编译：将整个项目 PLCopen XML 转换为 ST 中间代码，显示到控制台
 // ============================================================
 void MainWindow::buildProject()
 {
-    // 确定要编译的 POU
-    PouModel* targetPou = nullptr;
-    for (auto it = m_sceneMap.begin(); it != m_sceneMap.end(); ++it) {
-        if (it.value() == m_scene) { targetPou = it.key(); break; }
-    }
-
-    if (!m_scene || !targetPou) {
-        m_consoleEdit->appendPlainText(
-            "[ Build ] No graphical POU is active. Open an LD/FBD program first.");
+    if (!m_project) {
+        m_consoleEdit->appendPlainText("[ Build ] No project loaded.");
         m_consoleTabs->setCurrentWidget(m_consoleEdit);
         return;
     }
 
     m_consoleEdit->clear();
     m_consoleEdit->appendPlainText(
-        QString("[ Build ] Compiling POU: %1 ...").arg(targetPou->name));
+        QString("[ Build ] Converting project \"%1\" to ST ...").arg(m_project->projectName));
 
-    QString code = CodeGenerator::generate(targetPou->name, m_scene);
+    // 若项目尚未保存，提示先保存
+    if (m_project->filePath.isEmpty()) {
+        m_consoleEdit->appendPlainText(
+            "[ Build ] Project not saved to file yet. Please save first (Ctrl+S).");
+        m_consoleTabs->setCurrentWidget(m_consoleEdit);
+        statusBar()->showMessage("Build failed: unsaved project.", 4000);
+        return;
+    }
 
-    m_consoleEdit->appendPlainText("[ Build ] Done.\n");
+    // 读取已保存的 XML 文件
+    QString xmlContent;
+    {
+        QFile f(m_project->filePath);
+        if (f.open(QFile::ReadOnly | QFile::Text))
+            xmlContent = QString::fromUtf8(f.readAll());
+    }
+
+    if (xmlContent.isEmpty()) {
+        m_consoleEdit->appendPlainText("[ Build ] Cannot read project file.");
+        m_consoleTabs->setCurrentWidget(m_consoleEdit);
+        statusBar()->showMessage("Build failed.", 4000);
+        return;
+    }
+
+    QString stCode = StGenerator::fromXml(xmlContent);
+    if (stCode.isEmpty()) {
+        m_consoleEdit->appendPlainText(
+            "[ Build ] Error: " + StGenerator::lastError());
+        m_consoleTabs->setCurrentWidget(m_consoleEdit);
+        statusBar()->showMessage("Build failed.", 4000);
+        return;
+    }
+
+    m_consoleEdit->appendPlainText("[ Build ] Done — ST output:\n");
     m_consoleEdit->appendPlainText("─────────────────────────────────────────");
-    m_consoleEdit->appendPlainText(code);
+    m_consoleEdit->appendPlainText(stCode);
     m_consoleTabs->setCurrentWidget(m_consoleEdit);
 
-    statusBar()->showMessage(
-        QString("Build complete: %1").arg(targetPou->name), 4000);
+    statusBar()->showMessage("Build complete.", 4000);
 }
 
 // ============================================================
@@ -1285,6 +1410,46 @@ void MainWindow::connectToPlc()
         statusBar()->showMessage(
             QString("Connected to %1").arg(m_plcUri), 3000);
     });
+}
+
+// ============================================================
+// 视图缩放
+// ============================================================
+
+// 从当前活跃的 MDI 子窗口中找到 LadderView
+LadderView* MainWindow::activeView() const
+{
+    QMdiSubWindow* sw = m_mdiArea ? m_mdiArea->activeSubWindow() : nullptr;
+    if (!sw) return nullptr;
+    return sw->findChild<LadderView*>();
+}
+
+void MainWindow::zoomIn()
+{
+    if (LadderView* v = activeView()) {
+        // 限制最大缩放 5×
+        if (v->transform().m11() < 5.0)
+            v->scale(1.25, 1.25);
+    }
+}
+
+void MainWindow::zoomOut()
+{
+    if (LadderView* v = activeView()) {
+        // 限制最小缩放 0.05×
+        if (v->transform().m11() > 0.05)
+            v->scale(1.0 / 1.25, 1.0 / 1.25);
+    }
+}
+
+void MainWindow::zoomFit()
+{
+    LadderView* v = activeView();
+    if (!v || !v->scene()) return;
+
+    QRectF r = v->scene()->itemsBoundingRect().adjusted(-40, -40, 40, 40);
+    if (r.isEmpty()) r = QRectF(0, 0, 800, 600);
+    v->fitInView(r, Qt::KeepAspectRatio);
 }
 
 // ============================================================

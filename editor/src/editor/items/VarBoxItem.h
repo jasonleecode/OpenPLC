@@ -15,9 +15,6 @@ class VarBoxItem : public BaseItem
 public:
     enum Role { InVar, OutVar, InOutVar };
 
-    static const int W = 100;
-    static const int H = 30;
-
     explicit VarBoxItem(const QString& expression, Role role,
                         QGraphicsItem* parent = nullptr)
         : BaseItem(parent), m_expr(expression), m_role(role)
@@ -25,8 +22,15 @@ public:
         setToolTip("Variable — Double-click to edit");
     }
 
+    // 设置从 PLCopen XML 读取的实际像素尺寸（已乘 kScale）
+    void setExplicitSize(qreal w, qreal h) {
+        m_w = w; m_h = h;
+        prepareGeometryChange();
+        update();
+    }
+
     QRectF boundingRect() const override {
-        return QRectF(0, 0, W, H);
+        return QRectF(0, 0, m_w, m_h);
     }
 
     void paint(QPainter* painter,
@@ -35,33 +39,23 @@ public:
     {
         const bool selected = (option->state & QStyle::State_Selected);
 
-        // 颜色
         QColor border = selected ? QColor("#0078D7") : QColor("#2E7D32");
         QColor fill   = selected ? QColor("#E3F2FD") : QColor("#E8F5E9");
 
-        // 圆角矩形
         painter->setPen(QPen(border, selected ? 2.0 : 1.5));
         painter->setBrush(fill);
-        painter->drawRoundedRect(0, 0, W, H, 4, 4);
+        painter->drawRoundedRect(0, 0, m_w, m_h, 4, 4);
 
-        // 表达式文本（居中）
         QFont f("Consolas, Courier New");
-        f.setPixelSize(11);
+        f.setPixelSize(qMax(8, (int)(m_h * 0.38)));
         painter->setFont(f);
         painter->setPen(selected ? QColor("#004A99") : QColor("#1B5E20"));
-        painter->drawText(QRectF(3, 0, W - 6, H),
+        painter->drawText(QRectF(3, 0, m_w - 6, m_h),
                           Qt::AlignCenter, m_expr);
-
-        // 方向箭头（左侧 inOutVar：双箭头；右侧标志）
-        if (m_role == InOutVar) {
-            painter->setPen(QPen(border, 1.0));
-            // 无需额外绘制，边框颜色已区分
-        }
     }
 
-    // 对于 inVariable，左端口无效（不接收输入）
-    QPointF leftPort()  const override { return mapToScene(0,   H / 2); }
-    QPointF rightPort() const override { return mapToScene(W,   H / 2); }
+    QPointF leftPort()  const override { return mapToScene(0,    m_h / 2); }
+    QPointF rightPort() const override { return mapToScene(m_w,  m_h / 2); }
 
     QString expression() const { return m_expr; }
     Role    role()       const { return m_role; }
@@ -80,9 +74,11 @@ public:
     int type() const override { return Type; }
 
 protected:
-    int portYOffset() const override { return H / 2; }
+    int portYOffset() const override { return (int)(m_h / 2); }
 
 private:
     QString m_expr;
     Role    m_role;
+    qreal   m_w = 100;
+    qreal   m_h = 30;
 };
