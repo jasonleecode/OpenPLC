@@ -2,6 +2,7 @@
 *.d
 .claude/
 editor/build/
+runtime/build/
 
 # Compiled Object files
 *.slo
