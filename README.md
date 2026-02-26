@@ -1,9 +1,9 @@
 # OpenPLC-X
 OpenPLC-X项目，支持IEC 61131-3标准，PLC编译器选用matiec。支持LD和ST等PLC编程语言。
+
 <img width="1584" height="1015" alt="1772014885713" src="https://github.com/user-attachments/assets/25d98048-7b1e-4d24-80c2-1759bfe5dbc8" />
 
-
-同类的项目有Bememiz，但是这套代码组织很乱，历史包袱很重，基于Python，没有runtime相关的实现。
+支持NCC(Native Code Compiler)模式和XCODE(基于wasm的字节码)模式，在资源有限的mcu平台，建议使用NCC模式，在资源丰富算力较强的平台，推荐使用XCODE模式。
 
 
 editor是基于Qt6编写的梯形图编程工具，能够进行图形化的PLC编程，编译后可以通过网络将PLC程序下载到运行着runtime的PLC设备中；支持LD和ST等PLC编程语言；采用MVC分层；

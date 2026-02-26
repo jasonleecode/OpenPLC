@@ -64,6 +64,7 @@ private:
     void saveProject();
     void saveProjectAs();
     void buildProject();     // 编译：生成 C 代码
+    void downloadProject();  // 下载：打开下载对话框
     void connectToPlc();     // 连接/断开 PLC
 
     // ---- 项目树 ----
@@ -143,7 +144,8 @@ private:
     QMetaObject::Connection m_undoConn;
     QMetaObject::Connection m_redoConn;
     QString  m_currentTheme;         // 当前主题 QRC 路径
-    QAction* m_aConnect = nullptr;   // 连接/断开（图标随状态切换）
-    QAction* m_aRun     = nullptr;
-    QAction* m_aStop    = nullptr;
+    QAction* m_aConnect  = nullptr;  // 连接/断开（图标随状态切换）
+    QAction* m_aTransfer = nullptr;  // 下载程序
+    QAction* m_aRun      = nullptr;
+    QAction* m_aStop     = nullptr;
 };

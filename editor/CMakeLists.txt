@@ -25,13 +25,15 @@ set(CMAKE_AUTORCC ON)
 # Svg: 用于渲染矢量电气符号 (关键)
 # Xml: 用于保存/加载 PLC 项目文件
 # PrintSupport: 用于打印梯形图
-find_package(Qt6 COMPONENTS 
-    Widgets 
-    Core 
-    Gui 
-    Svg 
-    Xml 
-    PrintSupport 
+find_package(Qt6 COMPONENTS
+    Widgets
+    Core
+    Gui
+    Svg
+    Xml
+    PrintSupport
+    SerialPort
+    Network
     REQUIRED
 )
 
@@ -85,6 +87,17 @@ set(PROJECT_SOURCES
     src/utils/UndoStack.h
     src/utils/UndoStack.cpp
 
+    # 通信 / 下载
+    src/comm/IPlcTransport.h
+    src/comm/SerialTransport.h
+    src/comm/SerialTransport.cpp
+    src/comm/TcpTransport.h
+    src/comm/TcpTransport.cpp
+    src/comm/PlcProtocol.h
+    src/comm/PlcProtocol.cpp
+    src/comm/DownloadDialog.h
+    src/comm/DownloadDialog.cpp
+
     # 资源文件
     resources/tizi.qrc
 )
@@ -109,13 +122,15 @@ target_compile_definitions(TiZi PRIVATE
 # ==========================================
 # 5. 链接库
 # ==========================================
-target_link_libraries(TiZi PRIVATE 
-    Qt6::Widgets 
-    Qt6::Core 
-    Qt6::Gui 
-    Qt6::Svg 
+target_link_libraries(TiZi PRIVATE
+    Qt6::Widgets
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Svg
     Qt6::Xml
     Qt6::PrintSupport
+    Qt6::SerialPort
+    Qt6::Network
 )
 
 # ==========================================

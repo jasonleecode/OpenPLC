@@ -42,8 +42,8 @@ vpath %.h bsp/lpc_chip bsp/include app
 # Runtime A 源文件列表
 # -----------------------------------------------------------------------
 SOURCE_FILES := \
-    main.c            \
-    libutil.c         \
+    app/main.c        \
+    app/libutil.c     \
     app/runtime.c     \
     gcc_startup_lpc82x.c  \
     board_sysinit.c   \

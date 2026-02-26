@@ -50,6 +50,7 @@
 #include "../utils/TreeBranchStyle.h"
 #include "../core/compiler/CodeGenerator.h"
 #include "../core/compiler/StGenerator.h"
+#include "../comm/DownloadDialog.h"
 
 // PlcOpenViewer 兼作所有图形语言（LD/FBD/SFC）的统一编辑器
 
@@ -224,16 +225,7 @@ void MainWindow::setupMenuBar()
     // 传输/控制组
     auto* aDownload = plcMenu->addAction(
         QIcon(":/images/Transfer.png"), "Download...");
-    connect(aDownload, &QAction::triggered, this, [this]{
-        if (m_connState != PlcConnState::Connected) {
-            QMessageBox::warning(this, "Not Connected",
-                                 "Please connect to a PLC first.");
-            return;
-        }
-        QMessageBox::information(this, "Download",
-            "Program download is not yet implemented.\n"
-            "Build the project first, then transfer via your PLC runtime.");
-    });
+    connect(aDownload, &QAction::triggered, this, &MainWindow::downloadProject);
 
     auto* aColdStart = plcMenu->addAction("Cold Start");
     connect(aColdStart, &QAction::triggered, this, [this]{
@@ -622,18 +614,13 @@ void MainWindow::setupToolBar()
     // ══════════════════════════════════════════════════════════
     // 第5组：PLC 连接与控制（Connect · Transfer · Run · Stop）
     // ══════════════════════════════════════════════════════════
-    m_aConnect = tb->addAction(makeLdIcon("connect"), "Connect to PLC  [Ctrl+D]");
-    auto* aTransfer = tb->addAction(makeLdIcon("download"), "Transfer Program to PLC");
+    m_aConnect  = tb->addAction(makeLdIcon("connect"),  "Connect to PLC  [Ctrl+D]");
+    m_aTransfer = tb->addAction(makeLdIcon("download"), "Download Program to PLC");
     m_aRun  = tb->addAction(makeLdIcon("run"),  "Run PLC");
     m_aStop = tb->addAction(makeLdIcon("stop"), "Stop PLC");
 
     connect(m_aConnect,  &QAction::triggered, this, &MainWindow::connectToPlc);
-    connect(aTransfer,   &QAction::triggered, this, [this]{
-        if (m_connState != PlcConnState::Connected) {
-            statusBar()->showMessage("Not connected to PLC.", 3000); return;
-        }
-        statusBar()->showMessage("Transferring program to PLC…", 2000);
-    });
+    connect(m_aTransfer, &QAction::triggered, this, &MainWindow::downloadProject);
     connect(m_aRun, &QAction::triggered, this, [this]{
         if (m_connState != PlcConnState::Connected) {
             statusBar()->showMessage("Not connected to PLC.", 3000); return;
@@ -650,13 +637,10 @@ void MainWindow::setupToolBar()
     });
 
     m_aConnect->setShortcut(QKeySequence("Ctrl+D"));
-    // 初始状态：未连接时 Run/Stop 禁用
+    // 初始状态：Run/Stop 需要已连接；Transfer 下载对话框随时可用
     m_aRun->setEnabled(false);
     m_aStop->setEnabled(false);
-    aTransfer->setEnabled(false);
-    // 保存 Transfer 引用以便后续 enable/disable
-    m_aConnect->setProperty("transferAction",
-                            QVariant::fromValue(static_cast<QObject*>(aTransfer)));
+    m_aTransfer->setEnabled(true);
     tb->addSeparator();
 
     // ══════════════════════════════════════════════════════════
@@ -1656,6 +1640,15 @@ void MainWindow::buildProject()
 }
 
 // ============================================================
+// 下载：打开 DownloadDialog
+// ============================================================
+void MainWindow::downloadProject()
+{
+    DownloadDialog dlg(this);
+    dlg.exec();
+}
+
+// ============================================================
 // 状态栏：PLC 连接状态指示器
 // ============================================================
 
@@ -1774,13 +1767,6 @@ void MainWindow::setPlcConnState(PlcConnState state)
     }
     if (m_aRun)  m_aRun->setEnabled(connected);
     if (m_aStop) m_aStop->setEnabled(connected);
-
-    // Transfer 按钮（存储在 m_aConnect 属性中）
-    if (m_aConnect) {
-        if (auto* t = qobject_cast<QAction*>(
-                m_aConnect->property("transferAction").value<QObject*>()))
-            t->setEnabled(connected);
-    }
 
     // 未连接时重置运行状态
     if (state == PlcConnState::Disconnected)
