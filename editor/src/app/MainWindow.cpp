@@ -33,6 +33,12 @@
 #include <QPlainTextEdit>
 #include <QFont>
 #include <QFile>
+#include <QDir>
+#include <QFileInfo>
+#include <QProcess>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <QMenu>
 #include <QTimer>
 #include <QDomDocument>
@@ -1595,48 +1601,335 @@ void MainWindow::buildProject()
     }
 
     m_consoleEdit->clear();
-    m_consoleEdit->appendPlainText(
-        QString("[ Build ] Converting project \"%1\" to ST ...").arg(m_project->projectName));
+    m_consoleTabs->setCurrentWidget(m_consoleEdit);
 
-    // 若项目尚未保存，提示先保存
+    // ── 若项目尚未保存，提示先保存 ─────────────────────────────────
     if (m_project->filePath.isEmpty()) {
         m_consoleEdit->appendPlainText(
-            "[ Build ] Project not saved to file yet. Please save first (Ctrl+S).");
-        m_consoleTabs->setCurrentWidget(m_consoleEdit);
+            "[ Build ] Project not saved. Please save first (Ctrl+S).");
         statusBar()->showMessage("Build failed: unsaved project.", 4000);
         return;
     }
 
-    // 读取已保存的 XML 文件
+    m_consoleEdit->appendPlainText(
+        QString("[ Build ] Building \"%1\" ...").arg(m_project->projectName));
+
+    // ── 自动同步并保存 ──────────────────────────────────────────────
+    syncScenesBeforeSave(m_sceneMap);
+    m_project->saveToFile(m_project->filePath);
+
+    // ── Step 1/3: 生成 IEC 61131-3 ST ──────────────────────────────
+    m_consoleEdit->appendPlainText("[ 1/5 ] Generating IEC 61131-3 ST ...");
+
     QString xmlContent;
     {
         QFile f(m_project->filePath);
         if (f.open(QFile::ReadOnly | QFile::Text))
             xmlContent = QString::fromUtf8(f.readAll());
     }
-
     if (xmlContent.isEmpty()) {
-        m_consoleEdit->appendPlainText("[ Build ] Cannot read project file.");
-        m_consoleTabs->setCurrentWidget(m_consoleEdit);
+        m_consoleEdit->appendPlainText("       Error: cannot read project file.");
         statusBar()->showMessage("Build failed.", 4000);
         return;
     }
 
     QString stCode = StGenerator::fromXml(xmlContent);
     if (stCode.isEmpty()) {
+        m_consoleEdit->appendPlainText("       Error: " + StGenerator::lastError());
+        statusBar()->showMessage("Build failed.", 4000);
+        return;
+    }
+    m_consoleEdit->appendPlainText(
+        QString("       OK — %1 lines").arg(stCode.count('\n') + 1));
+
+    // ── 查找 matiec 工具目录 ────────────────────────────────────────
+    auto findMatiecDir = []() -> QString {
+        QStringList candidates = {
+            QString(MATIEC_DIR),    // CMake 注入的绝对路径（开发模式）
+            // macOS .app bundle：Contents/MacOS → OpenPLC/tools/matiec_mac
+            QDir::cleanPath(QCoreApplication::applicationDirPath()
+                            + "/../../../../../tools/matiec_mac"),
+            // Linux / non-bundle build 目录
+            QDir::cleanPath(QCoreApplication::applicationDirPath()
+                            + "/../../tools/matiec_mac"),
+        };
+        for (const QString& p : candidates) {
+            if (QFileInfo(p + "/iec2c").exists())
+                return p;
+        }
+        return {};
+    };
+
+    const QString matiecDir = findMatiecDir();
+    if (matiecDir.isEmpty()) {
         m_consoleEdit->appendPlainText(
-            "[ Build ] Error: " + StGenerator::lastError());
-        m_consoleTabs->setCurrentWidget(m_consoleEdit);
+            "       Error: matiec tools not found.\n"
+            "       Expected at: " + QString(MATIEC_DIR));
+        statusBar()->showMessage("Build failed.", 4000);
+        return;
+    }
+    const QString libDir = matiecDir + "/lib";
+
+    // ── 准备临时构建目录 ────────────────────────────────────────────
+    // 安全化项目名（仅保留字母/数字/下划线）
+    QString safeProj;
+    for (QChar c : m_project->projectName)
+        safeProj += (c.isLetterOrNumber() ? c : QChar('_'));
+
+    const QString buildDir = QCoreApplication::applicationDirPath() + "/output/" + safeProj;
+    const QString outDir   = buildDir + "/out_c";
+    QDir().mkpath(outDir);
+
+    // 写入临时 ST 文件
+    const QString stFile = buildDir + "/project.st";
+    {
+        QFile f(stFile);
+        if (!f.open(QFile::WriteOnly | QFile::Text | QFile::Truncate)) {
+            m_consoleEdit->appendPlainText("       Error: cannot write " + stFile);
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        f.write(stCode.toUtf8());
+    }
+
+    // ── Step 2/3: iec2iec — 语法校验 ───────────────────────────────
+    m_consoleEdit->appendPlainText("[ 2/5 ] Validating ST (iec2iec) ...");
+    {
+        QProcess proc;
+        // -p: 允许前向引用  -i: 允许无参数 POU（PROGRAM 通常无 I/O 参数）
+        QStringList args = {"-p", "-i", "-I", libDir, stFile};
+        proc.start(matiecDir + "/iec2iec", args);
+        if (!proc.waitForFinished(30000)) {
+            m_consoleEdit->appendPlainText("       Error: iec2iec timed out.");
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        const QString errOut = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        if (!errOut.isEmpty())
+            m_consoleEdit->appendPlainText(errOut);
+        if (proc.exitCode() != 0) {
+            m_consoleEdit->appendPlainText("       Validation FAILED.");
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        m_consoleEdit->appendPlainText("       OK");
+    }
+
+    // ── Step 3/5: iec2c — 编译 ST → C ──────────────────────────────
+    m_consoleEdit->appendPlainText("[ 3/5 ] Compiling to C (iec2c) ...");
+    {
+        QProcess proc;
+        QStringList args = {"-p", "-i", "-I", libDir, "-T", outDir, stFile};
+        proc.start(matiecDir + "/iec2c", args);
+        if (!proc.waitForFinished(30000)) {
+            m_consoleEdit->appendPlainText("       Error: iec2c timed out.");
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        const QString errOut = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        if (!errOut.isEmpty())
+            m_consoleEdit->appendPlainText(errOut);
+        if (proc.exitCode() != 0) {
+            m_consoleEdit->appendPlainText("       Compilation FAILED.");
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+    }
+
+    m_consoleEdit->appendPlainText("       OK");
+
+    const QString target = m_project->targetType;  // "Linux" / "Mac" / "Embedded"
+
+    // ── 收集 matiec 生成的 C 源文件（resource*.c 已 #include POUS.c，勿重复编译）
+    QStringList iecSources = {outDir + "/config.c"};
+    for (const QFileInfo& fi : QDir(outDir).entryInfoList({"resource*.c"}, QDir::Files))
+        iecSources << fi.absoluteFilePath();
+
+    // ─────────────────────────────────────────────────────────────────
+    // Step 4/5 + 5/5: 通过 driver 配置生成 wrapper 并编译
+    // ─────────────────────────────────────────────────────────────────
+
+    // 查找 driver 目录：targetType → driver 子目录名
+    auto findDriverDir = [&](const QString& targetType) -> QString {
+        static const QMap<QString, QString> kTargetToDriver = {
+            {"Mac",      "macos"},
+            {"Linux",    "linux"},
+            {"Embedded", "lpc824"},
+        };
+        QString driverName = kTargetToDriver.value(targetType, targetType.toLower());
+        QStringList searchPaths = {
+            QCoreApplication::applicationDirPath() + "/drivers/" + driverName,
+            QDir::cleanPath(QString(DRIVERS_DIR) + "/" + driverName),
+        };
+        for (const QString& p : searchPaths) {
+            if (QFileInfo(p + "/driver.json").exists())
+                return p;
+        }
+        return {};
+    };
+
+    const QString driverDir = findDriverDir(target);
+    if (driverDir.isEmpty()) {
+        m_consoleEdit->appendPlainText(
+            QString("       Error: no driver found for target \"%1\".\n"
+                    "       Expected in: %2").arg(target, QString(DRIVERS_DIR)));
         statusBar()->showMessage("Build failed.", 4000);
         return;
     }
 
-    m_consoleEdit->appendPlainText("[ Build ] Done — ST output:\n");
-    m_consoleEdit->appendPlainText("─────────────────────────────────────────");
-    m_consoleEdit->appendPlainText(stCode);
-    m_consoleTabs->setCurrentWidget(m_consoleEdit);
+    // 加载 driver.json
+    QJsonObject driver, compObj;
+    {
+        QFile driverFile(driverDir + "/driver.json");
+        if (!driverFile.open(QFile::ReadOnly)) {
+            m_consoleEdit->appendPlainText("       Error: cannot read driver.json at " + driverDir);
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        QJsonParseError err;
+        QJsonDocument doc = QJsonDocument::fromJson(driverFile.readAll(), &err);
+        if (doc.isNull()) {
+            m_consoleEdit->appendPlainText("       Error: driver.json parse error: " + err.errorString());
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        driver  = doc.object();
+        compObj = driver["compiler"].toObject();
+    }
 
-    statusBar()->showMessage("Build complete.", 4000);
+    // Step 4/5: 读取 wrapper 模板，写入构建目录
+    m_consoleEdit->appendPlainText("[ 4/5 ] Generating wrapper from driver template ...");
+    m_consoleEdit->appendPlainText(QString("       Driver: %1").arg(driver["name"].toString()));
+
+    const QString templatePath = driverDir + "/" + compObj["template"].toString();
+    QString wrapperContent;
+    {
+        QFile tmpl(templatePath);
+        if (!tmpl.open(QFile::ReadOnly | QFile::Text)) {
+            m_consoleEdit->appendPlainText("       Error: cannot read template: " + templatePath);
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        wrapperContent = QString::fromUtf8(tmpl.readAll());
+    }
+
+    const QString outputName   = compObj["output_name"].toString("plc_program");
+    const QString outputSuffix = compObj["output_suffix"].toString();
+    const QString wrapperFile  = buildDir + "/" + outputName + "_main.c";
+    {
+        QFile f(wrapperFile);
+        if (!f.open(QFile::WriteOnly | QFile::Text | QFile::Truncate)) {
+            m_consoleEdit->appendPlainText("       Error: cannot write wrapper file.");
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        f.write(wrapperContent.toUtf8());
+    }
+    m_consoleEdit->appendPlainText("       OK");
+
+    // Step 5/5: 编译
+    const QString cc      = compObj["cc"].toString("gcc");
+    const QString elfFile = buildDir + "/" + outputName + outputSuffix;
+    m_consoleEdit->appendPlainText(
+        QString("[ 5/5 ] Compiling for \"%1\" (%2) ...").arg(target, cc));
+    {
+        QProcess proc;
+        QStringList args;
+
+        // driver 定义的 cflags
+        for (const QJsonValue& v : compObj["cflags"].toArray())
+            args << v.toString();
+
+        // driver 定义的 include_dirs（相对于 driverDir）
+        for (const QJsonValue& v : compObj["include_dirs"].toArray())
+            args << "-I" << (driverDir + "/" + v.toString());
+
+        // matiec lib/C 头文件 + iec2c 生成的头文件
+        args << "-I" << matiecDir + "/lib/C"
+             << "-I" << outDir
+             << "-include" << "time.h";
+
+        // linker script（可选，Embedded 专用）
+        const QString ldRel = compObj["linker_script"].toString();
+        if (!ldRel.isEmpty())
+            args << "-Wl,-T," + driverDir + "/" + ldRel;
+
+        // 源文件：wrapper + matiec 生成的 C 文件
+        args << wrapperFile << iecSources;
+
+        // 输出
+        args << "-o" << elfFile;
+
+        // driver 定义的 ldflags
+        for (const QJsonValue& v : compObj["ldflags"].toArray())
+            args << v.toString();
+
+        // 项目级别自定义标志（可覆盖 driver 默认值）
+        if (!m_project->cflags.isEmpty())
+            args << m_project->cflags.split(' ', Qt::SkipEmptyParts);
+        if (!m_project->ldflags.isEmpty())
+            args << m_project->ldflags.split(' ', Qt::SkipEmptyParts);
+
+        proc.start(cc, args);
+        if (!proc.waitForFinished(60000)) {
+            m_consoleEdit->appendPlainText("       Error: compiler timed out.");
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        const QString ccOut = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+        const QString ccErr = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+        if (!ccOut.isEmpty()) m_consoleEdit->appendPlainText(ccOut);
+        if (!ccErr.isEmpty()) m_consoleEdit->appendPlainText(ccErr);
+        if (proc.exitCode() != 0) {
+            m_consoleEdit->appendPlainText("       Compilation FAILED.");
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+    }
+
+    // post_build（可选，如 Embedded 的 objcopy .elf -> .bin）
+    QString finalOutput = elfFile;
+    if (driver.contains("post_build")) {
+        QJsonObject pb = driver["post_build"].toObject();
+        const QString objcopy   = pb["objcopy"].toString();
+        const QString format    = pb["format"].toString("binary");
+        const QString binSuffix = pb["output_suffix"].toString(".bin");
+        const QString binFile   = buildDir + "/" + outputName + binSuffix;
+
+        m_consoleEdit->appendPlainText(
+            QString("       Post-build: %1 -O %2 ...").arg(objcopy, format));
+        {
+            QProcess proc;
+            proc.start(objcopy, {"-O", format, elfFile, binFile});
+            if (!proc.waitForFinished(15000)) {
+                m_consoleEdit->appendPlainText("       Error: " + objcopy + " timed out.");
+                statusBar()->showMessage("Build failed.", 4000);
+                return;
+            }
+            if (proc.exitCode() != 0) {
+                const QString err = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+                m_consoleEdit->appendPlainText("       " + objcopy + " FAILED: " + err);
+                statusBar()->showMessage("Build failed.", 4000);
+                return;
+            }
+        }
+        finalOutput = binFile;
+
+        // 显示 .bin 大小与容量限制
+        qint64 sz    = QFileInfo(binFile).size();
+        qint64 maxSz = pb["max_size_bytes"].toInteger(0);
+        QString sizeStr = maxSz > 0
+            ? QString("%1 bytes / %2 max").arg(sz).arg(maxSz)
+            : QString("%1 bytes").arg(sz);
+        m_consoleEdit->appendPlainText(
+            QString("       %1%2  (%3)").arg(outputName, binSuffix, sizeStr));
+    }
+
+    m_consoleEdit->appendPlainText("─────────────────────────────────────────");
+    m_consoleEdit->appendPlainText(
+        QString("[ Build ] SUCCESS  -->  %1").arg(finalOutput));
+    statusBar()->showMessage(
+        QString("Build complete -- %1").arg(QFileInfo(finalOutput).fileName()), 5000);
 }
 
 // ============================================================

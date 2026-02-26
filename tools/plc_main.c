@@ -1,0 +1,32 @@
+#include <time.h>
+#include <unistd.h>
+#include "iec_std_lib.h"
+#include "config.h"
+
+/* matiec runtime 要求的全局变量 */
+TIME __CURRENT_TIME;
+BOOL __DEBUG = 0;
+
+extern void config_init__(void);
+extern void config_run__(unsigned long tick);
+extern unsigned long long common_ticktime__;
+
+static void update_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    __CURRENT_TIME.tv_sec  = ts.tv_sec;
+    __CURRENT_TIME.tv_nsec = ts.tv_nsec;
+}
+
+int main(void) {
+    config_init__();
+    unsigned int tick_us = (unsigned int)(common_ticktime__ / 1000ULL);
+    if (tick_us == 0) tick_us = 10000;
+    unsigned long tick = 0;
+    for (;;) {
+        update_time();
+        config_run__(tick++);
+        usleep(tick_us);
+    }
+    return 0;
+}

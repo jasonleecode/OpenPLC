@@ -1,0 +1,15 @@
+{
+  "name": "Linux x86_64",
+  "description": "Linux desktop / server target — compiled with GCC, POSIX runtime",
+  "target_type": "Linux",
+  "arch": "x86_64",
+  "compiler": {
+    "cc": "gcc",
+    "cflags": ["-w"],
+    "ldflags": ["-lm"],
+    "include_dirs": [],
+    "template": "templates/plc_main.c",
+    "output_name": "plc_program",
+    "output_suffix": ""
+  }
+}

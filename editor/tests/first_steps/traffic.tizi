@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
-<project xmlns="http://www.plcopen.org/xml/tc6_0201" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xhtml="http://www.w3.org/1999/xhtml" xsi:schemaLocation="http://www.plcopen.org/xml/tc6_0201">
-  <fileHeader companyName="Beremiz" productName="Unnamed" productVersion="1" creationDateTime="2012-09-04T16:16:33"/>
-  <contentHeader name="traffic_lights" modificationDateTime="2021-10-01T22:28:55">
+<project xmlns="http://www.plcopen.org/xml/tc6_0201" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.plcopen.org/xml/tc6_0201">
+  <fileHeader author="" companyName="Beremiz" creationDateTime="2012-09-04T16:16:33" productName="Unnamed" productVersion="1"/>
+  <contentHeader comment="" modificationDateTime="2026-02-26T15:12:07" name="traffic_lights">
     <coordinateInfo>
       <fbd>
         <scaling x="0" y="0"/>
@@ -120,13 +120,13 @@
           <action name="BLINK_ORANGE_LIGHT">
             <body>
               <LD>
-                <leftPowerRail localId="1" height="40" width="3">
+                <leftPowerRail height="40" localId="1" width="3">
                   <position x="54" y="123"/>
                   <connectionPointOut formalParameter="">
                     <relPosition x="3" y="20"/>
                   </connectionPointOut>
                 </leftPowerRail>
-                <contact localId="2" height="15" width="21" negated="true">
+                <contact height="15" localId="2" negated="true" width="21">
                   <position x="121" y="135"/>
                   <connectionPointIn>
                     <relPosition x="0" y="8"/>
@@ -140,7 +140,7 @@
                   </connectionPointOut>
                   <variable>ORANGE_LIGHT</variable>
                 </contact>
-                <block localId="3" width="97" height="102" typeName="TON" instanceName="TON1">
+                <block height="102" instanceName="TON1" localId="3" typeName="TON" width="97">
                   <position x="216" y="103"/>
                   <inputVariables>
                     <variable formalParameter="IN">
@@ -176,14 +176,14 @@
                     </variable>
                   </outputVariables>
                 </block>
-                <inVariable localId="4" height="37" width="76" negated="false">
+                <inVariable height="37" localId="4" negated="false" width="76">
                   <position x="75" y="166"/>
                   <connectionPointOut>
                     <relPosition x="76" y="18"/>
                   </connectionPointOut>
                   <expression>T#500ms</expression>
                 </inVariable>
-                <block localId="5" width="97" height="106" typeName="TON" instanceName="TON2">
+                <block height="106" instanceName="TON2" localId="5" typeName="TON" width="97">
                   <position x="216" y="251"/>
                   <inputVariables>
                     <variable formalParameter="IN">
@@ -219,11 +219,11 @@
                     </variable>
                   </outputVariables>
                 </block>
-                <coil localId="6" height="15" width="21" storage="reset">
+                <coil height="15" localId="6" storage="reset" width="21">
                   <position x="517" y="284"/>
                   <connectionPointIn>
                     <relPosition x="0" y="8"/>
-                    <connection refLocalId="10" formalParameter="Q">
+                    <connection formalParameter="Q" refLocalId="10">
                       <position x="517" y="292"/>
                       <position x="427" y="292"/>
                     </connection>
@@ -233,7 +233,7 @@
                   </connectionPointOut>
                   <variable>ORANGE_LIGHT</variable>
                 </coil>
-                <rightPowerRail localId="7" height="40" width="3">
+                <rightPowerRail height="40" localId="7" width="3">
                   <position x="598" y="123"/>
                   <connectionPointIn>
                     <relPosition x="0" y="20"/>
@@ -243,11 +243,11 @@
                     </connection>
                   </connectionPointIn>
                 </rightPowerRail>
-                <coil localId="8" height="15" width="21" storage="set">
+                <coil height="15" localId="8" storage="set" width="21">
                   <position x="509" y="135"/>
                   <connectionPointIn>
                     <relPosition x="0" y="8"/>
-                    <connection refLocalId="11" formalParameter="Q">
+                    <connection formalParameter="Q" refLocalId="11">
                       <position x="509" y="143"/>
                       <position x="428" y="143"/>
                     </connection>
@@ -257,19 +257,19 @@
                   </connectionPointOut>
                   <variable>ORANGE_LIGHT</variable>
                 </coil>
-                <comment localId="9" height="52" width="318">
+                <comment height="52" localId="9" width="318">
                   <position x="51" y="11"/>
                   <content>
                     <xhtml:p><![CDATA[This action makes the orange light blink]]></xhtml:p>
                   </content>
                 </comment>
-                <block localId="10" width="58" height="40" typeName="R_TRIG" instanceName="R_TRIG0">
+                <block height="40" instanceName="R_TRIG0" localId="10" typeName="R_TRIG" width="58">
                   <position x="370" y="262"/>
                   <inputVariables>
                     <variable formalParameter="CLK">
                       <connectionPointIn>
                         <relPosition x="0" y="30"/>
-                        <connection refLocalId="5" formalParameter="Q">
+                        <connection formalParameter="Q" refLocalId="5">
                           <position x="370" y="292"/>
                           <position x="313" y="292"/>
                         </connection>
@@ -285,13 +285,13 @@
                     </variable>
                   </outputVariables>
                 </block>
-                <block localId="11" width="58" height="40" typeName="R_TRIG" instanceName="R_TRIG1">
+                <block height="40" instanceName="R_TRIG1" localId="11" typeName="R_TRIG" width="58">
                   <position x="371" y="113"/>
                   <inputVariables>
                     <variable formalParameter="CLK">
                       <connectionPointIn>
                         <relPosition x="0" y="30"/>
-                        <connection refLocalId="3" formalParameter="Q">
+                        <connection formalParameter="Q" refLocalId="3">
                           <position x="371" y="143"/>
                           <position x="313" y="143"/>
                         </connection>
@@ -307,7 +307,7 @@
                     </variable>
                   </outputVariables>
                 </block>
-                <rightPowerRail localId="12" height="40" width="3">
+                <rightPowerRail height="40" localId="12" width="3">
                   <position x="597" y="272"/>
                   <connectionPointIn>
                     <relPosition x="0" y="20"/>
@@ -317,13 +317,13 @@
                     </connection>
                   </connectionPointIn>
                 </rightPowerRail>
-                <leftPowerRail localId="13" height="40" width="3">
+                <leftPowerRail height="40" localId="13" width="3">
                   <position x="67" y="272"/>
                   <connectionPointOut formalParameter="">
                     <relPosition x="3" y="20"/>
                   </connectionPointOut>
                 </leftPowerRail>
-                <contact localId="14" height="15" width="21">
+                <contact height="15" localId="14" width="21">
                   <position x="134" y="284"/>
                   <connectionPointIn>
                     <relPosition x="0" y="8"/>
@@ -337,7 +337,7 @@
                   </connectionPointOut>
                   <variable>ORANGE_LIGHT</variable>
                 </contact>
-                <inVariable localId="15" height="36" width="77" negated="false">
+                <inVariable height="36" localId="15" negated="false" width="77">
                   <position x="85" y="317"/>
                   <connectionPointOut>
                     <relPosition x="77" y="18"/>
@@ -352,7 +352,7 @@
           <transition name="STOP">
             <body>
               <FBD>
-                <block localId="42" width="59" height="53" typeName="NOT" executionOrderId="0">
+                <block executionOrderId="0" height="53" localId="42" typeName="NOT" width="59">
                   <position x="237" y="31"/>
                   <inputVariables>
                     <variable formalParameter="IN">
@@ -374,18 +374,18 @@
                     </variable>
                   </outputVariables>
                 </block>
-                <inVariable localId="43" height="39" width="164" executionOrderId="0" negated="false">
+                <inVariable executionOrderId="0" height="39" localId="43" negated="false" width="164">
                   <position x="38" y="48"/>
                   <connectionPointOut>
                     <relPosition x="164" y="19"/>
                   </connectionPointOut>
                   <expression>SWITCH_BUTTON</expression>
                 </inVariable>
-                <outVariable localId="44" height="40" width="46" executionOrderId="0" negated="false">
+                <outVariable executionOrderId="0" height="40" localId="44" negated="false" width="46">
                   <position x="351" y="47"/>
                   <connectionPointIn>
                     <relPosition x="0" y="20"/>
-                    <connection refLocalId="42" formalParameter="OUT">
+                    <connection formalParameter="OUT" refLocalId="42">
                       <position x="351" y="67"/>
                       <position x="296" y="67"/>
                     </connection>
@@ -398,7 +398,7 @@
         </transitions>
         <body>
           <SFC>
-            <step localId="1" height="37" width="121" name="Standstill" initialStep="true">
+            <step height="37" initialStep="true" localId="1" name="Standstill" width="121">
               <position x="509" y="31"/>
               <connectionPointIn>
                 <relPosition x="60" y="0"/>
@@ -418,7 +418,7 @@
                 <relPosition x="121" y="18"/>
               </connectionPointOutAction>
             </step>
-            <transition localId="2" height="2" width="20">
+            <transition height="2" localId="2" width="20">
               <position x="559" y="222"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -438,7 +438,7 @@
                 </inline>
               </condition>
             </transition>
-            <step localId="3" height="30" width="118" name="ORANGE">
+            <step height="30" localId="3" name="ORANGE" width="118">
               <position x="510" y="250"/>
               <connectionPointIn>
                 <relPosition x="59" y="0"/>
@@ -454,7 +454,7 @@
                 <relPosition x="118" y="15"/>
               </connectionPointOutAction>
             </step>
-            <transition localId="6" height="2" width="20">
+            <transition height="2" localId="6" width="20">
               <position x="559" y="376"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -474,7 +474,7 @@
                 </inline>
               </condition>
             </transition>
-            <actionBlock localId="8" width="231" height="162">
+            <actionBlock height="162" localId="8" width="231">
               <position x="711" y="34"/>
               <connectionPointIn>
                 <relPosition x="0" y="15"/>
@@ -512,7 +512,7 @@
                 <reference name="GREEN_LIGHT"/>
               </action>
             </actionBlock>
-            <actionBlock localId="9" width="232" height="125">
+            <actionBlock height="125" localId="9" width="232">
               <position x="711" y="250"/>
               <connectionPointIn>
                 <relPosition x="0" y="15"/>
@@ -533,12 +533,12 @@
                 <relPosition x="0" y="0"/>
                 <reference name="PEDESTRIAN_RED_LIGHT"/>
               </action>
-              <action localId="0" qualifier="D" duration="T#2s">
+              <action duration="T#2s" localId="0" qualifier="D">
                 <relPosition x="0" y="0"/>
                 <reference name="STOP_CARS"/>
               </action>
             </actionBlock>
-            <step localId="10" height="34" width="92" name="RED">
+            <step height="34" localId="10" name="RED" width="92">
               <position x="523" y="411"/>
               <connectionPointIn>
                 <relPosition x="46" y="0"/>
@@ -554,7 +554,7 @@
                 <relPosition x="92" y="17"/>
               </connectionPointOutAction>
             </step>
-            <actionBlock localId="11" width="235" height="103">
+            <actionBlock height="103" localId="11" width="235">
               <position x="710" y="413"/>
               <connectionPointIn>
                 <relPosition x="0" y="15"/>
@@ -571,12 +571,12 @@
                 <relPosition x="0" y="0"/>
                 <reference name="RED_LIGHT"/>
               </action>
-              <action localId="0" qualifier="D" duration="T#2s">
+              <action duration="T#2s" localId="0" qualifier="D">
                 <relPosition x="0" y="0"/>
                 <reference name="ALLOW_PEDESTRIANS"/>
               </action>
             </actionBlock>
-            <transition localId="12" height="2" width="20">
+            <transition height="2" localId="12" width="20">
               <position x="559" y="533"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -596,7 +596,7 @@
                 </inline>
               </condition>
             </transition>
-            <selectionDivergence localId="15" height="1" width="154">
+            <selectionDivergence height="1" localId="15" width="154">
               <position x="415" y="335"/>
               <connectionPointIn>
                 <relPosition x="154" y="0"/>
@@ -612,7 +612,7 @@
                 <relPosition x="154" y="1"/>
               </connectionPointOut>
             </selectionDivergence>
-            <transition localId="16" height="2" width="20">
+            <transition height="2" localId="16" width="20">
               <position x="405" y="377"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -628,7 +628,7 @@
                 <reference name="STOP"/>
               </condition>
             </transition>
-            <jumpStep localId="17" height="13" width="12" targetName="Standstill">
+            <jumpStep height="13" localId="17" targetName="Standstill" width="12">
               <position x="409" y="418"/>
               <connectionPointIn>
                 <relPosition x="6" y="0"/>
@@ -638,7 +638,7 @@
                 </connection>
               </connectionPointIn>
             </jumpStep>
-            <transition localId="4" height="2" width="20">
+            <transition height="2" localId="4" width="20">
               <position x="400" y="528"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -654,7 +654,7 @@
                 <reference name="STOP"/>
               </condition>
             </transition>
-            <jumpStep localId="5" height="13" width="12" targetName="Standstill">
+            <jumpStep height="13" localId="5" targetName="Standstill" width="12">
               <position x="404" y="553"/>
               <connectionPointIn>
                 <relPosition x="6" y="0"/>
@@ -664,7 +664,7 @@
                 </connection>
               </connectionPointIn>
             </jumpStep>
-            <selectionDivergence localId="7" height="1" width="159">
+            <selectionDivergence height="1" localId="7" width="159">
               <position x="410" y="486"/>
               <connectionPointIn>
                 <relPosition x="159" y="0"/>
@@ -680,7 +680,7 @@
                 <relPosition x="159" y="1"/>
               </connectionPointOut>
             </selectionDivergence>
-            <step localId="18" height="32" width="177" name="PEDESTRIAN_GREEN">
+            <step height="32" localId="18" name="PEDESTRIAN_GREEN" width="177">
               <position x="481" y="572"/>
               <connectionPointIn>
                 <relPosition x="88" y="0"/>
@@ -696,7 +696,7 @@
                 <relPosition x="177" y="16"/>
               </connectionPointOutAction>
             </step>
-            <actionBlock localId="19" width="247" height="110">
+            <actionBlock height="110" localId="19" width="247">
               <position x="708" y="573"/>
               <connectionPointIn>
                 <relPosition x="0" y="15"/>
@@ -713,12 +713,12 @@
                 <relPosition x="0" y="0"/>
                 <reference name="PEDESTRIAN_RED_LIGHT"/>
               </action>
-              <action localId="0" qualifier="D" duration="T#10s">
+              <action duration="T#10s" localId="0" qualifier="D">
                 <relPosition x="0" y="0"/>
                 <reference name="STOP_PEDESTRIANS"/>
               </action>
             </actionBlock>
-            <transition localId="20" height="2" width="20">
+            <transition height="2" localId="20" width="20">
               <position x="400" y="653"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -738,7 +738,7 @@
                 </inline>
               </condition>
             </transition>
-            <jumpStep localId="21" height="13" width="12" targetName="Standstill">
+            <jumpStep height="13" localId="21" targetName="Standstill" width="12">
               <position x="404" y="694"/>
               <connectionPointIn>
                 <relPosition x="6" y="0"/>
@@ -748,7 +748,7 @@
                 </connection>
               </connectionPointIn>
             </jumpStep>
-            <selectionDivergence localId="22" height="1" width="159">
+            <selectionDivergence height="1" localId="22" width="159">
               <position x="410" y="625"/>
               <connectionPointIn>
                 <relPosition x="159" y="0"/>
@@ -766,7 +766,7 @@
                 <relPosition x="159" y="1"/>
               </connectionPointOut>
             </selectionDivergence>
-            <transition localId="23" height="2" width="20">
+            <transition height="2" localId="23" width="20">
               <position x="559" y="709"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -786,7 +786,7 @@
                 </inline>
               </condition>
             </transition>
-            <step localId="24" height="30" width="148" name="PEDESTRIAN_RED">
+            <step height="30" localId="24" name="PEDESTRIAN_RED" width="148">
               <position x="495" y="748"/>
               <connectionPointIn>
                 <relPosition x="74" y="0"/>
@@ -802,7 +802,7 @@
                 <relPosition x="148" y="15"/>
               </connectionPointOutAction>
             </step>
-            <actionBlock localId="25" width="239" height="110">
+            <actionBlock height="110" localId="25" width="239">
               <position x="708" y="748"/>
               <connectionPointIn>
                 <relPosition x="0" y="15"/>
@@ -819,12 +819,12 @@
                 <relPosition x="0" y="0"/>
                 <reference name="PEDESTRIAN_GREEN_LIGHT"/>
               </action>
-              <action localId="0" qualifier="D" duration="T#2s">
+              <action duration="T#2s" localId="0" qualifier="D">
                 <relPosition x="0" y="0"/>
                 <reference name="ALLOW_CARS"/>
               </action>
             </actionBlock>
-            <transition localId="26" height="2" width="20">
+            <transition height="2" localId="26" width="20">
               <position x="400" y="857"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -845,7 +845,7 @@
                 </connectionPointIn>
               </condition>
             </transition>
-            <jumpStep localId="27" height="13" width="12" targetName="Standstill">
+            <jumpStep height="13" localId="27" targetName="Standstill" width="12">
               <position x="404" y="898"/>
               <connectionPointIn>
                 <relPosition x="6" y="0"/>
@@ -855,7 +855,7 @@
                 </connection>
               </connectionPointIn>
             </jumpStep>
-            <selectionDivergence localId="28" height="1" width="159">
+            <selectionDivergence height="1" localId="28" width="159">
               <position x="410" y="815"/>
               <connectionPointIn>
                 <relPosition x="159" y="0"/>
@@ -871,7 +871,7 @@
                 <relPosition x="159" y="1"/>
               </connectionPointOut>
             </selectionDivergence>
-            <transition localId="29" height="2" width="20">
+            <transition height="2" localId="29" width="20">
               <position x="559" y="879"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -891,7 +891,7 @@
                 </inline>
               </condition>
             </transition>
-            <step localId="30" height="33" width="92" name="GREEN">
+            <step height="33" localId="30" name="GREEN" width="92">
               <position x="523" y="930"/>
               <connectionPointIn>
                 <relPosition x="46" y="0"/>
@@ -907,7 +907,7 @@
                 <relPosition x="92" y="16"/>
               </connectionPointOutAction>
             </step>
-            <actionBlock localId="31" width="227" height="110">
+            <actionBlock height="110" localId="31" width="227">
               <position x="709" y="931"/>
               <connectionPointIn>
                 <relPosition x="0" y="15"/>
@@ -924,18 +924,18 @@
                 <relPosition x="0" y="0"/>
                 <reference name="RED_LIGHT"/>
               </action>
-              <action localId="0" qualifier="D" duration="T#20s">
+              <action duration="T#20s" localId="0" qualifier="D">
                 <relPosition x="0" y="0"/>
                 <reference name="WARN_CARS"/>
               </action>
             </actionBlock>
-            <block localId="32" width="89" height="94" typeName="TON" instanceName="TON3">
+            <block height="94" instanceName="TON3" localId="32" typeName="TON" width="89">
               <position x="308" y="1053"/>
               <inputVariables>
                 <variable formalParameter="IN">
                   <connectionPointIn>
                     <relPosition x="0" y="38"/>
-                    <connection refLocalId="44" formalParameter="Q1">
+                    <connection formalParameter="Q1" refLocalId="44">
                       <position x="308" y="1091"/>
                       <position x="291" y="1091"/>
                       <position x="291" y="1065"/>
@@ -967,27 +967,27 @@
                 </variable>
               </outputVariables>
             </block>
-            <inVariable localId="33" height="36" width="168" negated="false">
+            <inVariable height="36" localId="33" negated="false" width="168">
               <position x="15" y="1047"/>
               <connectionPointOut>
                 <relPosition x="168" y="18"/>
               </connectionPointOut>
               <expression>PEDESTRIAN_BUTTON</expression>
             </inVariable>
-            <inVariable localId="34" height="33" width="53" negated="false">
+            <inVariable height="33" localId="34" negated="false" width="53">
               <position x="217" y="1112"/>
               <connectionPointOut>
                 <relPosition x="53" y="16"/>
               </connectionPointOut>
               <expression>T#2s</expression>
             </inVariable>
-            <block localId="35" width="67" height="60" typeName="OR">
+            <block height="60" localId="35" typeName="OR" width="67">
               <position x="459" y="1061"/>
               <inputVariables>
                 <variable formalParameter="IN1">
                   <connectionPointIn>
                     <relPosition x="0" y="30"/>
-                    <connection refLocalId="32" formalParameter="Q">
+                    <connection formalParameter="Q" refLocalId="32">
                       <position x="459" y="1091"/>
                       <position x="397" y="1091"/>
                     </connection>
@@ -1014,14 +1014,14 @@
                 </variable>
               </outputVariables>
             </block>
-            <inVariable localId="36" height="30" width="97" negated="false">
+            <inVariable height="30" localId="36" negated="false" width="97">
               <position x="163" y="1182"/>
               <connectionPointOut>
                 <relPosition x="97" y="15"/>
               </connectionPointOut>
               <expression>WARN_CARS</expression>
             </inVariable>
-            <transition localId="37" height="2" width="20">
+            <transition height="2" localId="37" width="20">
               <position x="559" y="1090"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -1035,14 +1035,14 @@
               </connectionPointOut>
               <condition>
                 <connectionPointIn>
-                  <connection refLocalId="35" formalParameter="OUT">
+                  <connection formalParameter="OUT" refLocalId="35">
                     <position x="559" y="1091"/>
                     <position x="526" y="1091"/>
                   </connection>
                 </connectionPointIn>
               </condition>
             </transition>
-            <selectionDivergence localId="38" height="1" width="207">
+            <selectionDivergence height="1" localId="38" width="207">
               <position x="569" y="1059"/>
               <connectionPointIn>
                 <relPosition x="0" y="0"/>
@@ -1058,7 +1058,7 @@
                 <relPosition x="207" y="1"/>
               </connectionPointOut>
             </selectionDivergence>
-            <transition localId="39" height="2" width="20">
+            <transition height="2" localId="39" width="20">
               <position x="766" y="1095"/>
               <connectionPointIn>
                 <relPosition x="10" y="0"/>
@@ -1078,7 +1078,7 @@
                 </inline>
               </condition>
             </transition>
-            <jumpStep localId="41" height="13" width="12" targetName="ORANGE">
+            <jumpStep height="13" localId="41" targetName="ORANGE" width="12">
               <position x="563" y="1137"/>
               <connectionPointIn>
                 <relPosition x="6" y="0"/>
@@ -1088,7 +1088,7 @@
                 </connection>
               </connectionPointIn>
             </jumpStep>
-            <block localId="44" width="51" height="60" typeName="SR" instanceName="SR0">
+            <block height="60" instanceName="SR0" localId="44" typeName="SR" width="51">
               <position x="224" y="1035"/>
               <inputVariables>
                 <variable formalParameter="S1">
@@ -1103,7 +1103,7 @@
                 <variable formalParameter="R">
                   <connectionPointIn>
                     <relPosition x="0" y="50"/>
-                    <connection refLocalId="32" formalParameter="Q">
+                    <connection formalParameter="Q" refLocalId="32">
                       <position x="224" y="1085"/>
                       <position x="203" y="1085"/>
                       <position x="203" y="1167"/>
@@ -1123,7 +1123,7 @@
                 </variable>
               </outputVariables>
             </block>
-            <comment localId="45" height="767" width="753">
+            <comment height="767" localId="45" width="753">
               <position x="973" y="21"/>
               <content>
                 <xhtml:p><![CDATA[*** Description of SFC action qualifiers ***
@@ -1170,7 +1170,7 @@ inactive as soon as the action is reset.
 ]]></xhtml:p>
               </content>
             </comment>
-            <comment localId="46" height="224" width="375">
+            <comment height="224" localId="46" width="375">
               <position x="8" y="326"/>
               <content>
                 <xhtml:p><![CDATA[Conditions can be written in any IEC 61131-3 language.
@@ -1182,13 +1182,13 @@ They can be implemented in defferent ways:
 See below examples of all these types.]]></xhtml:p>
               </content>
             </comment>
-            <leftPowerRail localId="47" height="40" width="3">
+            <leftPowerRail height="40" localId="47" width="3">
               <position x="189" y="838"/>
               <connectionPointOut formalParameter="">
                 <relPosition x="3" y="20"/>
               </connectionPointOut>
             </leftPowerRail>
-            <contact localId="48" height="15" width="21" negated="true">
+            <contact height="15" localId="48" negated="true" width="21">
               <position x="269" y="850"/>
               <connectionPointIn>
                 <relPosition x="0" y="8"/>
@@ -1202,7 +1202,7 @@ See below examples of all these types.]]></xhtml:p>
               </connectionPointOut>
               <variable>SWITCH_BUTTON</variable>
             </contact>
-            <comment localId="13" height="86" width="379">
+            <comment height="86" localId="13" width="379">
               <position x="9" y="28"/>
               <content>
                 <xhtml:p><![CDATA[Sequential function chart (SFC) is commonly used to describe state machines.]]></xhtml:p>
@@ -1258,7 +1258,7 @@ See below examples of all these types.]]></xhtml:p>
         </interface>
         <body>
           <FBD>
-            <block localId="1" width="350" height="836" typeName="traffic_light_sequence" instanceName="trafic_light_sequence0" executionOrderId="0">
+            <block executionOrderId="0" height="836" instanceName="trafic_light_sequence0" localId="1" typeName="traffic_light_sequence" width="350">
               <position x="494" y="462"/>
               <inputVariables>
                 <variable formalParameter="SWITCH_BUTTON">
@@ -1309,7 +1309,7 @@ See below examples of all these types.]]></xhtml:p>
                 </variable>
               </outputVariables>
             </block>
-            <comment localId="24" height="287" width="1008">
+            <comment height="287" localId="24" width="1008">
               <position x="22" y="13"/>
               <content>
                 <xhtml:p><![CDATA[This example implements control of traffic lights.
@@ -1331,7 +1331,7 @@ Inkscape is a free and open-source vector graphics editor. It's not part of Bere
 ]]></xhtml:p>
               </content>
             </comment>
-            <comment localId="102" height="134" width="734">
+            <comment height="134" localId="102" width="734">
               <position x="21" y="303"/>
               <content>
                 <xhtml:p><![CDATA[In this example FB like 'Button', 'Led' and 'Text' are used. 
@@ -1340,69 +1340,69 @@ This is the way how elements in SVG are bound to elements in PLC program.
 You can find out or edit these IDs in Inkscape.]]></xhtml:p>
               </content>
             </comment>
-            <inVariable localId="103" executionOrderId="0" height="24" width="106" negated="false">
+            <inVariable executionOrderId="0" height="24" localId="103" negated="false" width="106">
               <position x="340" y="551"/>
               <connectionPointOut>
                 <relPosition x="106" y="12"/>
               </connectionPointOut>
               <expression>SwitchButton</expression>
             </inVariable>
-            <inVariable localId="104" executionOrderId="0" height="24" width="138" negated="false">
+            <inVariable executionOrderId="0" height="24" localId="104" negated="false" width="138">
               <position x="300" y="714"/>
               <connectionPointOut>
                 <relPosition x="138" y="12"/>
               </connectionPointOut>
               <expression>PedestrianButton</expression>
             </inVariable>
-            <outVariable localId="105" executionOrderId="0" height="24" width="74" negated="false">
+            <outVariable executionOrderId="0" height="24" localId="105" negated="false" width="74">
               <position x="891" y="551"/>
               <connectionPointIn>
                 <relPosition x="0" y="12"/>
-                <connection refLocalId="1" formalParameter="RED_LIGHT">
+                <connection formalParameter="RED_LIGHT" refLocalId="1">
                   <position x="891" y="563"/>
                   <position x="844" y="563"/>
                 </connection>
               </connectionPointIn>
               <expression>RedLight</expression>
             </outVariable>
-            <outVariable localId="106" executionOrderId="0" height="24" width="98" negated="false">
+            <outVariable executionOrderId="0" height="24" localId="106" negated="false" width="98">
               <position x="880" y="714"/>
               <connectionPointIn>
                 <relPosition x="0" y="12"/>
-                <connection refLocalId="1" formalParameter="ORANGE_LIGHT">
+                <connection formalParameter="ORANGE_LIGHT" refLocalId="1">
                   <position x="880" y="726"/>
                   <position x="844" y="726"/>
                 </connection>
               </connectionPointIn>
               <expression>OrangeLight</expression>
             </outVariable>
-            <outVariable localId="107" executionOrderId="0" height="24" width="90" negated="false">
+            <outVariable executionOrderId="0" height="24" localId="107" negated="false" width="90">
               <position x="881" y="877"/>
               <connectionPointIn>
                 <relPosition x="0" y="12"/>
-                <connection refLocalId="1" formalParameter="GREEN_LIGHT">
+                <connection formalParameter="GREEN_LIGHT" refLocalId="1">
                   <position x="881" y="889"/>
                   <position x="844" y="889"/>
                 </connection>
               </connectionPointIn>
               <expression>GreenLight</expression>
             </outVariable>
-            <outVariable localId="108" executionOrderId="0" height="24" width="154" negated="false">
+            <outVariable executionOrderId="0" height="24" localId="108" negated="false" width="154">
               <position x="882" y="1040"/>
               <connectionPointIn>
                 <relPosition x="0" y="12"/>
-                <connection refLocalId="1" formalParameter="PEDESTRIAN_RED_LIGHT">
+                <connection formalParameter="PEDESTRIAN_RED_LIGHT" refLocalId="1">
                   <position x="882" y="1052"/>
                   <position x="844" y="1052"/>
                 </connection>
               </connectionPointIn>
               <expression>PedestrianRedLight</expression>
             </outVariable>
-            <outVariable localId="109" executionOrderId="0" height="24" width="170" negated="false">
+            <outVariable executionOrderId="0" height="24" localId="109" negated="false" width="170">
               <position x="873" y="1203"/>
               <connectionPointIn>
                 <relPosition x="0" y="12"/>
-                <connection refLocalId="1" formalParameter="PEDESTRIAN_GREEN_LIGHT">
+                <connection formalParameter="PEDESTRIAN_GREEN_LIGHT" refLocalId="1">
                   <position x="873" y="1215"/>
                   <position x="844" y="1215"/>
                 </connection>
@@ -1414,11 +1414,12 @@ You can find out or edit these IDs in Inkscape.]]></xhtml:p>
       </pou>
     </pous>
   </types>
+  <TiZiBuild cflags="" compiler="gcc" ldflags="" linker="gcc" targetType="Linux"/>
   <instances>
     <configurations>
       <configuration name="config">
         <resource name="resource1">
-          <task name="test_task" interval="T#100ms" priority="0">
+          <task interval="T#100ms" name="test_task" priority="0">
             <pouInstance name="main_instance" typeName="main_program"/>
           </task>
         </resource>

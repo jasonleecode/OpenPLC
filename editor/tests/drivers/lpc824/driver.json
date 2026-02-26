@@ -1,0 +1,51 @@
+{
+  "name": "NXP LPC824 (Cortex-M0+)",
+  "description": "NXP LPC824M201JDH20 — 32KB Flash / 8KB SRAM, Cortex-M0+",
+  "target_type": "Embedded",
+  "mcu": "LPC824M201JDH20",
+  "arch": "ARM Cortex-M0+",
+  "flash_total_kb": 32,
+  "ram_total_kb": 8,
+  "memory_map": {
+    "runtime_flash_base": "0x00000000",
+    "runtime_flash_size_kb": 16,
+    "user_flash_base": "0x00004000",
+    "user_flash_size_kb": 16,
+    "runtime_ram_base": "0x10000000",
+    "runtime_ram_size_kb": 4,
+    "user_ram_base": "0x10001000",
+    "user_ram_size_kb": 4
+  },
+  "compiler": {
+    "cc": "arm-none-eabi-gcc",
+    "cflags": [
+      "-mcpu=cortex-m0plus",
+      "-mthumb",
+      "-mfloat-abi=soft",
+      "-Os",
+      "-ffunction-sections",
+      "-fdata-sections",
+      "-nostartfiles",
+      "--specs=nosys.specs",
+      "--specs=nano.specs",
+      "-w"
+    ],
+    "ldflags": [
+      "-Wl,--gc-sections",
+      "-lm",
+      "-lc",
+      "-lgcc"
+    ],
+    "linker_script": "linker/lpc824_user.ld",
+    "include_dirs": ["include"],
+    "template": "templates/user_logic_wrapper.c",
+    "output_name": "user_logic",
+    "output_suffix": ".elf"
+  },
+  "post_build": {
+    "objcopy": "arm-none-eabi-objcopy",
+    "format": "binary",
+    "output_suffix": ".bin",
+    "max_size_bytes": 16384
+  }
+}

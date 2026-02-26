@@ -1,0 +1,15 @@
+{
+  "name": "macOS (Apple Silicon / x86_64)",
+  "description": "macOS desktop target — compiled with GCC/Clang, POSIX runtime",
+  "target_type": "Mac",
+  "arch": "universal",
+  "compiler": {
+    "cc": "gcc",
+    "cflags": ["-w"],
+    "ldflags": ["-lm"],
+    "include_dirs": [],
+    "template": "templates/plc_main.c",
+    "output_name": "plc_program",
+    "output_suffix": ""
+  }
+}
