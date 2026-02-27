@@ -1,3 +1,6 @@
 [submodule "library/matiec"]
 	path = library/matiec
 	url = git@github.com:jasonleecode/matiec.git
+[submodule "library/wasm"]
+	path = library/wasm
+	url = git@github.com:jasonleecode/wasm-micro-runtime.git
