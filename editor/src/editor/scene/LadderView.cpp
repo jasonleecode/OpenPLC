@@ -1,8 +1,13 @@
-// 自定义视图 (处理缩放、平移、模式光标)
+// 自定义视图 (处理缩放、平移、模式光标、拖放)
 
 #include "LadderView.h"
+#include "LadderScene.h"
 #include <QWheelEvent>
 #include <QScrollBar>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeData>
 
 LadderView::LadderView(QWidget *parent)
     : QGraphicsView(parent)
@@ -23,6 +28,9 @@ LadderView::LadderView(QWidget *parent)
     
     // 5. 允许拖拽模式
     setDragMode(QGraphicsView::RubberBandDrag); // 默认左键是框选
+
+    // 6. 接受从 Library 面板拖放的功能块
+    setAcceptDrops(true);
 }
 
 void LadderView::wheelEvent(QWheelEvent *event)
@@ -82,6 +90,42 @@ void LadderView::mouseReleaseEvent(QMouseEvent *event)
     } else {
         QGraphicsView::mouseReleaseEvent(event);
     }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 拖放处理 —— 从 Library 面板拖入功能块
+// ──────────────────────────────────────────────────────────────
+void LadderView::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (event->mimeData()->hasFormat("application/x-tizi-blocktype"))
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void LadderView::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (event->mimeData()->hasFormat("application/x-tizi-blocktype"))
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void LadderView::dropEvent(QDropEvent *event)
+{
+    if (!event->mimeData()->hasFormat("application/x-tizi-blocktype")) {
+        event->ignore();
+        return;
+    }
+    auto* ls = qobject_cast<LadderScene*>(scene());
+    if (!ls) {
+        event->ignore();
+        return;
+    }
+    const QString typeName = QString::fromUtf8(
+        event->mimeData()->data("application/x-tizi-blocktype"));
+    ls->addFunctionBlock(typeName, mapToScene(event->position().toPoint()));
+    event->acceptProposedAction();
 }
 
 // ──────────────────────────────────────────────────────────────

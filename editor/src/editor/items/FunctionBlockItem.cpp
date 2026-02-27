@@ -1,9 +1,82 @@
 #include "FunctionBlockItem.h"
+#include "../../app/BlockPropertiesDialog.h"
 
 #include <QPainter>
 #include <QStyleOptionGraphicsItem>
-#include <QInputDialog>
 #include <QGraphicsSceneMouseEvent>
+#include <QApplication>
+#include <QCoreApplication>
+#include <QFile>
+#include <QDomDocument>
+#include <QMap>
+
+// ── 静态库查找（读 library.xml，首次调用后缓存）─────────────────
+struct LibInfo {
+    QString     comment;
+    QString     kind;   // "function" / "functionBlock"
+    QStringList inNames,  inTypes;
+    QStringList outNames, outTypes;
+    bool        valid = false;
+};
+
+static QMap<QString, LibInfo>& libCache() {
+    static QMap<QString, LibInfo> cache;
+    return cache;
+}
+
+static QString findLibXml() {
+    const QString appDir = QCoreApplication::applicationDirPath();
+    for (const QString& c : {
+            appDir + "/conf/library.xml",
+            appDir + "/../Resources/conf/library.xml"
+    }) {
+        if (QFile::exists(c)) return c;
+    }
+#ifdef LIBRARY_XML_PATH
+    if (QFile::exists(QString(LIBRARY_XML_PATH))) return QString(LIBRARY_XML_PATH);
+#endif
+    return {};
+}
+
+static void ensureLibLoaded() {
+    auto& cache = libCache();
+    if (!cache.isEmpty()) return;
+
+    QFile file(findLibXml());
+    if (!file.open(QIODevice::ReadOnly)) return;
+    QDomDocument doc;
+    if (!doc.setContent(&file)) return;
+
+    QDomElement root = doc.documentElement(); // <library>
+    for (QDomElement cat = root.firstChildElement("category"); !cat.isNull();
+         cat = cat.nextSiblingElement("category")) {
+        for (QDomElement elem = cat.firstChildElement(); !elem.isNull();
+             elem = elem.nextSiblingElement()) {
+            const QString name = elem.attribute("name");
+            if (name.isEmpty()) continue;
+            LibInfo info;
+            info.valid   = true;
+            info.comment = elem.attribute("comment");
+            info.kind    = elem.tagName(); // "function" or "functionBlock"
+            for (QDomElement port = elem.firstChildElement(); !port.isNull();
+                 port = port.nextSiblingElement()) {
+                if (port.tagName() == "input") {
+                    info.inNames  << port.attribute("name");
+                    info.inTypes  << port.attribute("type");
+                } else if (port.tagName() == "output") {
+                    info.outNames << port.attribute("name");
+                    info.outTypes << port.attribute("type");
+                }
+            }
+            cache.insert(name, info);
+        }
+    }
+}
+
+static LibInfo lookupLib(const QString& typeName) {
+    ensureLibLoaded();
+    return libCache().value(typeName); // valid=false if not found
+}
 
 // ── 常用功能块的端口定义 ──────────────────────────────────────
 struct FbPortDef {
@@ -292,11 +365,45 @@ void FunctionBlockItem::setInstanceName(const QString& n) {
     update();
 }
 
+// X 和 Y 均吸附到 GridSize（20px）网格，不做梯级中心吸附
+QVariant FunctionBlockItem::itemChange(GraphicsItemChange change,
+                                        const QVariant &value)
+{
+    if (change == ItemPositionChange && scene()) {
+        QPointF p = value.toPointF();
+        qreal x = qRound(p.x() / GridSize) * (qreal)GridSize;
+        qreal y = qRound(p.y() / GridSize) * (qreal)GridSize;
+        return QPointF(x, y);
+    }
+    return QGraphicsObject::itemChange(change, value);
+}
+
 void FunctionBlockItem::editProperties() {
-    bool ok;
-    const QString name = QInputDialog::getText(
-        nullptr, "Edit Function Block",
-        "Instance name:", QLineEdit::Normal, m_instanceName, &ok);
-    if (ok && !name.isEmpty())
-        setInstanceName(name);
+    // Look up block type in library.xml (cached after first load)
+    const LibInfo lib = lookupLib(m_blockType);
+
+    // Port names: prefer what's already on the canvas item (reflects actual connections)
+    // Port types: from library (canvas item doesn't store types)
+    const QStringList inNames  = m_inputs.isEmpty()  && lib.valid ? lib.inNames  : m_inputs;
+    const QStringList outNames = m_outputs.isEmpty() && lib.valid ? lib.outNames : m_outputs;
+    const QStringList inTypes  = lib.valid ? lib.inTypes  : QStringList();
+    const QStringList outTypes = lib.valid ? lib.outTypes : QStringList();
+    const QString comment      = lib.valid ? lib.comment  : QString();
+    const QString kind         = lib.valid ? lib.kind     : QStringLiteral("functionBlock");
+
+    BlockPropertiesDialog dlg(
+        m_blockType,
+        kind,
+        comment,
+        inNames,  inTypes,
+        outNames, outTypes,
+        QApplication::activeWindow(),
+        m_instanceName  // non-null → editable mode with OK/Cancel
+    );
+
+    if (dlg.exec() == QDialog::Accepted) {
+        const QString newName = dlg.getInstanceName().trimmed();
+        if (!newName.isEmpty())
+            setInstanceName(newName);
+    }
 }

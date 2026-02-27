@@ -72,8 +72,9 @@ public:
     QVector<QPointF>  m_xmlOutPorts;
 
 protected:
-    // FB 不参与梯级中心吸附（体积大，自由放置更合适），用网格吸附
+    // FB 使用均匀网格吸附（X 和 Y 均为 GridSize），不参与梯级中心吸附
     int portYOffset() const override { return 0; }
+    QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
 
 private:
     void rebuildPorts();

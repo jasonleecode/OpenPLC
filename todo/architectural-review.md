@@ -266,15 +266,10 @@ Beremiz 的库树是从 `stdlib.xml`、`extensionlib` 以及项目中的 POU 动
 
 | 优先级 | 问题 | 影响 |
 |--------|------|------|
-| 🔴 P0 | WireItem 不跟随元件移动 | 编辑器基本不可用 |
-| 🔴 P0 | 新建图形程序无法保存 | 所有新建内容丢失 |
-| 🔴 P0 | 无撤销/重做 | 用户操作无法回退 |
 | 🟠 P1 | BaseItem 梯级吸附在 FBD 触发 | FBD 编辑错位 |
 | 🟠 P1 | Task/Resource 模型缺失 | 生成代码无法调度 |
-| 🟠 P1 | 编译器输出无法实际编译 | Build 功能无实用价值 |
 | 🟡 P2 | 全局变量 / VAR_GLOBAL 支持 | 多 POU 程序无法共享数据 |
 | 🟡 P2 | 在线监控基础设施 | 无法调试运行中的 PLC |
-| 🟡 P2 | 实际 PLC 通信协议 | Connect 是假的 |
 | 🟢 P3 | 用户数据类型 (UDT) | 复杂程序需要 |
 | 🟢 P3 | AT 地址绑定 (%IX/%QX) | I/O 映射 |
 | 🟢 P3 | 端口吸附缩放修正 | 精度问题 |
@@ -283,22 +278,7 @@ Beremiz 的库树是从 `stdlib.xml`、`extensionlib` 以及项目中的 POU 动
 
 ## 八、架构改进路线图
 
-### 短期（P0 修复）
 
-1. **实现 `PlcOpenViewer::toXmlString()`** — 解决保存问题
-   - 遍历场景中的 ContactItem / CoilItem / FunctionBlockItem / VarBoxItem / WireItem
-   - 序列化为 PLCopen XML `<body><LD>` 或 `<body><FBD>` 格式
-   - 写回 `pou->graphicalXml`，纳入 `ProjectModel::saveToFile`
-
-2. **WireItem 改为逻辑引用** — 解决移动断线
-   - 存储 `QPointer<BaseItem> srcItem, dstItem` + 端口索引
-   - `paint()` / `updatePosition()` 从 item 实时查询端口坐标
-   - `itemChange` 通知机制：元件移动时调用 `wire->updatePosition()`
-
-3. **集成 `QUndoStack`** — 撤销/重做
-   - 在 `PlcOpenViewer` 中持有 `QUndoStack* m_undoStack`
-   - 将 addItem / removeItem / moveItem 包装为 `QUndoCommand` 子类
-   - 连接到工具栏 Undo/Redo 动作
 
 ### 中期（P1 修复）
 

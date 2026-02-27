@@ -19,7 +19,7 @@
   这六个文件内容为零，删除毫无风险。
 
   > 回答：
-  
+
 
   ---
   二、需要你澄清意图的文件
@@ -50,22 +50,7 @@
   这直接影响它在架构里的位置（属于 core/ 还是独立的 sim/）。
 
   ---
-  4. LadderScene vs PlcOpenViewer 的关系
-
-  这是最重要的架构问题。
-
-  目前状态：
-  - LadderScene：老的 LD 专用画布，有完整的编辑实现（放置触点/线圈、画导线、Delete 键等）
-  - PlcOpenViewer：新的统一图形编辑器，支持 LD/FBD/SFC，也实现了同样的编辑能力，且能序列化回 PLCopen XML
-
-  MainWindow::createPouEditorWidget() 里，所有图形语言都走 PlcOpenViewer，LadderScene 没有被 MainWindow 直接使用。但
-  LadderView、UndoStack 等都依赖 LadderScene.h 里的 EditorMode 枚举。
-
-  我的疑问：LadderScene 是否可以理解为"已被 PlcOpenViewer 替代的遗产代码"？还是你希望保留它作为某种简化场景（不依赖 PLCopen XML
-  的纯 LD 编辑器）？
-
-  ---
-  5. CodeGenerator vs StGenerator 的职责边界
+  1. CodeGenerator vs StGenerator 的职责边界
 
   - StGenerator：PLCopen XML → ST 文本（走 matiec 流水线，最终输出可执行文件）
   - CodeGenerator：直接从 LD 图形场景生成 C 代码（绕过 matiec）

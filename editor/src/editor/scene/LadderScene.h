@@ -58,6 +58,9 @@ public:
 
     QUndoStack* undoStack() const { return m_undoStack; }
 
+    // 从拖放操作（Library→Canvas）创建功能块并加入撤销栈
+    void addFunctionBlock(const QString& typeName, const QPointF& scenePos);
+
 signals:
     void modeChanged(EditorMode mode);
 

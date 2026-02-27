@@ -29,6 +29,23 @@ LadderScene::LadderScene(QObject *parent)
 }
 
 // ══════════════════════════════════════════════════════════════
+// addFunctionBlock —— 从 Library 拖放创建功能块（支持 undo）
+// ══════════════════════════════════════════════════════════════
+void LadderScene::addFunctionBlock(const QString& typeName, const QPointF& scenePos)
+{
+    auto snapG = [](qreal v) { return qRound(v / GridSize) * (qreal)GridSize; };
+    const QPointF snapPos(snapG(scenePos.x()), snapG(scenePos.y()));
+
+    auto* fb = new FunctionBlockItem(
+        typeName, QString("%1_%2").arg(typeName).arg(m_fbCount++));
+    fb->setPos(snapPos);
+    int lid = m_nextLocalId++;
+    fb->setData(0, lid);
+    m_items[lid] = fb;
+    m_undoStack->push(new AddItemCmd(this, fb, QString("Drop %1").arg(typeName)));
+}
+
+// ══════════════════════════════════════════════════════════════
 // setMode —— 切换编辑模式（含临时导线清理）
 // ══════════════════════════════════════════════════════════════
 void LadderScene::setMode(EditorMode mode)

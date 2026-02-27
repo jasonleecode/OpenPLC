@@ -52,6 +52,8 @@ set(PROJECT_SOURCES
     src/app/MainWindow.h
     src/app/ProjectManager.cpp
     src/app/ProjectManager.h
+    src/app/BlockPropertiesDialog.h
+    src/app/BlockPropertiesDialog.cpp
 
     # Editor 层 (我们先预留这些位置，后续会填入具体代码)
     src/editor/scene/LadderScene.cpp

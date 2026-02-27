@@ -18,6 +18,9 @@ public:
                const QStyleOptionGraphicsItem *option,
                QWidget *widget) override;
 
+    // 加宽点击区域（10 px），方便鼠标拾取
+    QPainterPath shape() const override;
+
     enum { Type = UserType + 10 };
     int type() const override { return Type; }
 

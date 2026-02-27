@@ -49,6 +49,8 @@
 #include <QEvent>
 #include <QGroupBox>
 #include <QApplication>
+#include <QDrag>
+#include <QMimeData>
 
 #include "../editor/scene/LadderScene.h"
 #include "../editor/scene/LadderView.h"
@@ -57,6 +59,7 @@
 #include "../utils/TreeBranchStyle.h"
 #include "../core/compiler/CodeGenerator.h"
 #include "../core/compiler/StGenerator.h"
+#include "BlockPropertiesDialog.h"
 #include "../comm/DownloadDialog.h"
 
 // PlcOpenViewer 兼作所有图形语言（LD/FBD/SFC）的统一编辑器
@@ -708,7 +711,74 @@ void MainWindow::setupProjectPanel()
 // ============================================================
 // 右侧停靠栏：函数库 + 调试器
 // ============================================================
+
+// LibraryTreeWidget —— 支持把 function/functionBlock 叶节点拖到画布
+class LibraryTreeWidget : public QTreeWidget {
+public:
+    explicit LibraryTreeWidget(QWidget* parent = nullptr) : QTreeWidget(parent) {
+        setDragEnabled(true);
+        setDragDropMode(QAbstractItemView::DragOnly);
+    }
+protected:
+    void startDrag(Qt::DropActions /*supportedActions*/) override {
+        QTreeWidgetItem* item = currentItem();
+        if (!item) return;
+        const QString kind = item->data(0, Qt::UserRole).toString();
+        if (kind != "function" && kind != "functionBlock") return;
+
+        const QString typeName = item->text(0);
+        auto* mime = new QMimeData();
+        mime->setData("application/x-tizi-blocktype", typeName.toUtf8());
+
+        auto* drag = new QDrag(this);
+        drag->setMimeData(mime);
+        drag->exec(Qt::CopyAction);
+    }
+};
+
+// Helper: recursively filter tree items by name (case-insensitive).
+// Returns true if this item or any descendant matches, so the parent stays visible.
+static bool filterLibraryItem(QTreeWidgetItem* item, const QString& text)
+{
+    const bool isLeaf = item->childCount() == 0;
+    if (isLeaf) {
+        const bool match = text.isEmpty() ||
+                           item->text(0).contains(text, Qt::CaseInsensitive);
+        item->setHidden(!match);
+        return match;
+    }
+    bool anyChildVisible = false;
+    for (int i = 0; i < item->childCount(); ++i)
+        if (filterLibraryItem(item->child(i), text))
+            anyChildVisible = true;
+    item->setHidden(!anyChildVisible);
+    item->setExpanded(!text.isEmpty() && anyChildVisible);
+    return anyChildVisible;
+}
+
 // Helper: recursively populate tree from <category>/<function>/<functionBlock> DOM
+// 从 DOM 元素读取 input/output 端口信息，以 "name|name|..." 和 "type|type|..." 形式存入 item
+static void storePortData(QTreeWidgetItem* node, const QDomElement& elem)
+{
+    QStringList inNames, inTypes, outNames, outTypes;
+    for (QDomElement port = elem.firstChildElement();
+         !port.isNull(); port = port.nextSiblingElement())
+    {
+        if (port.tagName() == "input") {
+            inNames  << port.attribute("name");
+            inTypes  << port.attribute("type");
+        } else if (port.tagName() == "output") {
+            outNames << port.attribute("name");
+            outTypes << port.attribute("type");
+        }
+    }
+    node->setData(0, Qt::UserRole + 1, elem.attribute("comment"));
+    node->setData(0, Qt::UserRole + 2, inNames.join("|"));
+    node->setData(0, Qt::UserRole + 3, inTypes.join("|"));
+    node->setData(0, Qt::UserRole + 4, outNames.join("|"));
+    node->setData(0, Qt::UserRole + 5, outTypes.join("|"));
+}
+
 static void populateLibraryNode(QTreeWidgetItem* parent,
                                  const QDomElement& elem,
                                  const QIcon& folderIcon,
@@ -729,12 +799,14 @@ static void populateLibraryNode(QTreeWidgetItem* parent,
             const QString comment = child.attribute("comment");
             if (!comment.isEmpty()) node->setToolTip(0, comment);
             node->setData(0, Qt::UserRole, "function");
+            storePortData(node, child);
         } else if (tag == "functionBlock") {
             auto* node = new QTreeWidgetItem(parent, QStringList{child.attribute("name")});
             node->setIcon(0, fbIcon);
             const QString comment = child.attribute("comment");
             if (!comment.isEmpty()) node->setToolTip(0, comment);
             node->setData(0, Qt::UserRole, "functionBlock");
+            storePortData(node, child);
         }
     }
 }
@@ -759,7 +831,7 @@ void MainWindow::setupLibraryPanel()
     searchEdit->setPlaceholderText("Search...");
     libLay->addWidget(searchEdit);
 
-    m_libraryTree = new QTreeWidget();
+    m_libraryTree = new LibraryTreeWidget();
     m_libraryTree->setObjectName("libraryTree");
     m_libraryTree->setHeaderHidden(true);
     m_libraryTree->setStyle(new TreeBranchStyle());
@@ -809,6 +881,32 @@ void MainWindow::setupLibraryPanel()
         auto* userNode = new QTreeWidgetItem(m_libraryTree, QStringList{"User-defined POU"});
         userNode->setIcon(0, folderIcon);
     }
+
+    // 搜索框过滤：输入时实时显示/隐藏匹配项
+    connect(searchEdit, &QLineEdit::textChanged,
+            m_libraryTree, [this](const QString& text) {
+        for (int i = 0; i < m_libraryTree->topLevelItemCount(); ++i)
+            filterLibraryItem(m_libraryTree->topLevelItem(i), text);
+    });
+
+    // 双击叶节点（function / functionBlock）弹出 Block Properties 对话框
+    connect(m_libraryTree, &QTreeWidget::itemDoubleClicked,
+            this, [this](QTreeWidgetItem* item, int) {
+        const QString kind = item->data(0, Qt::UserRole).toString();
+        if (kind != "function" && kind != "functionBlock") return;
+
+        const QString name    = item->text(0);
+        const QString comment = item->data(0, Qt::UserRole + 1).toString();
+        const QStringList inNames  = item->data(0, Qt::UserRole + 2).toString().split("|", Qt::SkipEmptyParts);
+        const QStringList inTypes  = item->data(0, Qt::UserRole + 3).toString().split("|", Qt::SkipEmptyParts);
+        const QStringList outNames = item->data(0, Qt::UserRole + 4).toString().split("|", Qt::SkipEmptyParts);
+        const QStringList outTypes = item->data(0, Qt::UserRole + 5).toString().split("|", Qt::SkipEmptyParts);
+
+        BlockPropertiesDialog dlg(name, kind, comment,
+                                   inNames, inTypes,
+                                   outNames, outTypes, this);
+        dlg.exec();
+    });
 
     libLay->addWidget(m_libraryTree);
     libTabs->addTab(libWidget, "Library");

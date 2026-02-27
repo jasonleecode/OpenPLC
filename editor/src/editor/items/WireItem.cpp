@@ -3,6 +3,7 @@
 #include "WireItem.h"
 #include <QPainter>
 #include <QStyleOptionGraphicsItem>
+#include <QPainterPathStroker>
 
 WireItem::WireItem(const QPointF& startPos, const QPointF& endPos,
                    QGraphicsItem* parent)
@@ -34,6 +35,14 @@ void WireItem::paint(QPainter *painter,
         Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter->setBrush(Qt::NoBrush);
     painter->drawPath(path());
+}
+
+QPainterPath WireItem::shape() const
+{
+    QPainterPathStroker stroker;
+    stroker.setWidth(10.0);   // 点击区域扩展到 10 px，方便选中
+    stroker.setCapStyle(Qt::RoundCap);
+    return stroker.createStroke(path());
 }
 
 void WireItem::updatePath()

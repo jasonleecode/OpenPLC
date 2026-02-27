@@ -24,12 +24,126 @@
 #include <QBrush>
 #include <QColor>
 #include <QTimer>
+#include <QGraphicsSceneMouseEvent>
+#include <QGraphicsView>
+#include <QKeyEvent>
 #include <algorithm>
+#include "../../utils/UndoStack.h"
 
 // ─────────────────────────────────────────────────────────────
 // PLCopen 坐标 → 场景坐标放大系数
 // ─────────────────────────────────────────────────────────────
 static constexpr qreal kScale = 2.0;
+
+// ═══════════════════════════════════════════════════════════════
+// 导线编辑 Undo 命令（仅在本文件内可见）
+// ═══════════════════════════════════════════════════════════════
+
+// AddWireCmd —— 添加一条绑定到端口的导线（含 m_connections 更新）
+class AddWireCmd : public QUndoCommand {
+    PlcOpenViewer*         m_scene;
+    QGraphicsPathItem*     m_wire;
+    PlcOpenViewer::FbdConn m_conn;
+    bool                   m_ownWire = true;
+public:
+    AddWireCmd(PlcOpenViewer* scene, QGraphicsPathItem* wire,
+               PlcOpenViewer::FbdConn conn, QUndoCommand* parent = nullptr)
+        : QUndoCommand("Add Wire", parent)
+        , m_scene(scene), m_wire(wire), m_conn(conn) {}
+    ~AddWireCmd() override { if (m_ownWire) delete m_wire; }
+    void redo() override {
+        m_conn.wire = m_wire;
+        m_scene->addItem(m_wire);
+        m_scene->m_connections << m_conn;
+        m_scene->m_wireTimer->start();
+        m_ownWire = false;
+    }
+    void undo() override {
+        for (int i = m_scene->m_connections.size()-1; i >= 0; --i)
+            if (m_scene->m_connections[i].wire == m_wire)
+                m_scene->m_connections.removeAt(i);
+        m_scene->removeItem(m_wire);
+        m_ownWire = true;
+    }
+};
+
+// MoveWireEndpointCmd —— 重连导线端点（切换所连的端口）
+class MoveWireEndpointCmd : public QUndoCommand {
+    PlcOpenViewer*         m_scene;
+    QGraphicsPathItem*     m_wire;
+    PlcOpenViewer::FbdConn m_before, m_after;
+public:
+    MoveWireEndpointCmd(PlcOpenViewer* scene, QGraphicsPathItem* wire,
+                        const PlcOpenViewer::FbdConn& before,
+                        const PlcOpenViewer::FbdConn& after,
+                        QUndoCommand* parent = nullptr)
+        : QUndoCommand("Reconnect Wire", parent)
+        , m_scene(scene), m_wire(wire), m_before(before), m_after(after) {}
+    void redo() override {
+        for (auto& c : m_scene->m_connections)
+            if (c.wire == m_wire) { auto* w = c.wire; c = m_after; c.wire = w; break; }
+        m_scene->updateAllWires();
+    }
+    void undo() override {
+        for (auto& c : m_scene->m_connections)
+            if (c.wire == m_wire) { auto* w = c.wire; c = m_before; c.wire = w; break; }
+        m_scene->updateAllWires();
+    }
+};
+
+// MoveWireHorizCmd —— 拖动导线水平线段（上下移动，更新 srcJogY 或 dstJogY）
+class MoveWireHorizCmd : public QUndoCommand {
+    PlcOpenViewer*     m_scene;
+    QGraphicsPathItem* m_wire;
+    bool               m_isSrc;    // true=srcJogY, false=dstJogY
+    qreal              m_before, m_after;
+public:
+    MoveWireHorizCmd(PlcOpenViewer* scene, QGraphicsPathItem* wire,
+                     bool isSrc, qreal before, qreal after,
+                     QUndoCommand* parent = nullptr)
+        : QUndoCommand("Move Wire Segment", parent)
+        , m_scene(scene), m_wire(wire), m_isSrc(isSrc)
+        , m_before(before), m_after(after) {}
+    void redo() override {
+        for (auto& c : m_scene->m_connections)
+            if (c.wire == m_wire) {
+                if (m_isSrc) c.srcJogY = m_after; else c.dstJogY = m_after;
+                break;
+            }
+        m_scene->updateAllWires();
+    }
+    void undo() override {
+        for (auto& c : m_scene->m_connections)
+            if (c.wire == m_wire) {
+                if (m_isSrc) c.srcJogY = m_before; else c.dstJogY = m_before;
+                break;
+            }
+        m_scene->updateAllWires();
+    }
+};
+
+// MoveWireSegmentCmd —— 拖动导线中间折点（调整走线，仅更新 customMidX）
+class MoveWireSegmentCmd : public QUndoCommand {
+    PlcOpenViewer*     m_scene;
+    QGraphicsPathItem* m_wire;
+    qreal              m_before, m_after;
+public:
+    MoveWireSegmentCmd(PlcOpenViewer* scene, QGraphicsPathItem* wire,
+                       qreal before, qreal after,
+                       QUndoCommand* parent = nullptr)
+        : QUndoCommand("Move Wire Segment", parent)
+        , m_scene(scene), m_wire(wire), m_before(before), m_after(after) {}
+    void redo() override {
+        for (auto& c : m_scene->m_connections)
+            if (c.wire == m_wire) { c.customMidX = m_after; break; }
+        m_scene->updateAllWires();
+    }
+    void undo() override {
+        for (auto& c : m_scene->m_connections)
+            if (c.wire == m_wire) { c.customMidX = m_before; break; }
+        m_scene->updateAllWires();
+    }
+};
 
 // ─────────────────────────────────────────────────────────────
 // SFC 颜色（FBD/LD 用各 item 自身配色）
@@ -155,8 +269,11 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
 
         // ── 功能块（block）──────────────────────────────────────
         if (tag == "block") {
-            const QString typeName     = e.attribute("typeName");
-            const QString instanceName = e.attribute("instanceName");
+            const QString typeName = e.attribute("typeName");
+            // 若 PLCopen XML 中没有 instanceName（标准函数常见），自动生成唯一名
+            QString instanceName = e.attribute("instanceName");
+            if (instanceName.isEmpty())
+                instanceName = QString("%1_%2").arg(typeName).arg(m_fbCount++);
 
             QStringList      inNames, outNames;
             QVector<QPointF> inRelPts, outRelPts;
@@ -359,12 +476,8 @@ void PlcOpenViewer::drawFbdWires(const QDomElement& body)
                 int     refId = conn.attribute("refLocalId","-1").toInt();
                 QString fp    = conn.attribute("formalParameter","");
 
-                auto* wire = new QGraphicsPathItem();
-                QPen pen(kColWire, 1.5);
-                pen.setJoinStyle(Qt::RoundJoin);
-                pen.setCapStyle(Qt::RoundCap);
-                wire->setPen(pen);
-                wire->setFlag(QGraphicsItem::ItemIsSelectable, true);
+                // WireItem 提供宽点击区域（shape()）和选中高亮（paint()）
+                auto* wire = new WireItem(QPointF(), QPointF());
                 wire->setZValue(-1);
                 addItem(wire);
 
@@ -669,29 +782,498 @@ QPointF PlcOpenViewer::getInputPortScene(int lid, const QString& param) const
     return {-1e9, -1e9};
 }
 
+// ── 通用路径构建：H-V-H，支持 src/dst 侧垂直折点 ─────────────
+static QPainterPath buildWirePath(const QPointF& src, const QPointF& dst,
+                                   qreal midX, qreal srcJogY, qreal dstJogY)
+{
+    const qreal sY = qIsNaN(srcJogY) ? src.y() : srcJogY;
+    const qreal dY = qIsNaN(dstJogY) ? dst.y() : dstJogY;
+    QPainterPath path;
+    path.moveTo(src);
+    if (!qIsNaN(srcJogY))
+        path.lineTo(src.x(), sY);   // src 侧垂直折
+    path.lineTo(midX, sY);          // 上段水平
+    path.lineTo(midX, dY);          // 中间垂直
+    if (!qIsNaN(dstJogY))
+        path.lineTo(dst.x(), dY);   // 下段水平
+    path.lineTo(dst);               // dst 侧垂直折（若 dstJogY 有效）
+    return path;
+}
+
 void PlcOpenViewer::updateAllWires()
 {
     if (m_updatingWires) return;
     m_updatingWires = true;
 
     for (FbdConn& c : m_connections) {
-        if (!c.wire) continue;
+        if (!c.wire || c.wire->scene() != this) continue;
         QPointF src = getOutputPortScene(c.srcId, c.srcParam);
         QPointF dst = getInputPortScene (c.dstId, c.dstParam);
         if (src.x() < -1e8 || dst.x() < -1e8) {
             c.wire->setPath(QPainterPath());
             continue;
         }
-        QPainterPath path;
-        path.moveTo(src);
-        qreal midX = (src.x() + dst.x()) / 2.0;
-        path.lineTo(midX, src.y());
-        path.lineTo(midX, dst.y());
-        path.lineTo(dst);
-        c.wire->setPath(path);
+        qreal midX = qIsNaN(c.customMidX) ? (src.x() + dst.x()) / 2.0 : c.customMidX;
+        c.wire->setPath(buildWirePath(src, dst, midX, c.srcJogY, c.dstJogY));
     }
 
     m_updatingWires = false;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 端口反向查找 & 线段几何判断
+// ═══════════════════════════════════════════════════════════════
+
+PlcOpenViewer::PortRef PlcOpenViewer::findPortAt(const QPointF& pos, qreal radius) const
+{
+    PortRef best;
+    qreal bestD2 = radius * radius;
+
+    auto check = [&](int lid, const QString& param, bool isOut, const QPointF& pt) {
+        qreal dx = pt.x() - pos.x(), dy = pt.y() - pos.y();
+        qreal d2 = dx*dx + dy*dy;
+        if (d2 < bestD2) { bestD2 = d2; best = {lid, param, isOut}; }
+    };
+
+    for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
+        int lid = it.key();
+        QGraphicsItem* gi = it.value();
+        if (auto* fb = qgraphicsitem_cast<FunctionBlockItem*>(gi)) {
+            for (int i = 0; i < fb->inputCount(); ++i)
+                check(lid, fb->inputPortName(i),  false, fb->inputPortPos(i));
+            for (int i = 0; i < fb->outputCount(); ++i)
+                check(lid, fb->outputPortName(i), true,  fb->outputPortPos(i));
+        } else if (auto* vb = qgraphicsitem_cast<VarBoxItem*>(gi)) {
+            if (vb->role() != VarBoxItem::OutVar)
+                check(lid, {}, true,  vb->rightPort());
+            if (vb->role() != VarBoxItem::InVar)
+                check(lid, {}, false, vb->leftPort());
+        } else if (auto* ct = qgraphicsitem_cast<ContactItem*>(gi)) {
+            check(lid, {}, false, ct->leftPort());
+            check(lid, {}, true,  ct->rightPort());
+        } else if (auto* coil = qgraphicsitem_cast<CoilItem*>(gi)) {
+            check(lid, {}, false, coil->leftPort());
+            check(lid, {}, true,  coil->rightPort());
+        }
+    }
+    return best;
+}
+
+bool PlcOpenViewer::nearWireVertSeg(const FbdConn& c, const QPointF& pos, qreal tol) const
+{
+    if (!c.wire) return false;
+    QPainterPath p = c.wire->path();
+    if (p.elementCount() < 4) return false;
+    // 在路径中找垂直线段（dx ≈ 0, 有一定长度），检测 pos 是否在其附近
+    int n = p.elementCount();
+    for (int i = 0; i < n-1; ++i) {
+        qreal dx = p.elementAt(i+1).x - p.elementAt(i).x;
+        qreal y0 = qMin(p.elementAt(i).y, p.elementAt(i+1).y);
+        qreal y1 = qMax(p.elementAt(i).y, p.elementAt(i+1).y);
+        if (qAbs(dx) < 1.0 && (y1 - y0) > 4.0) {   // 垂直线段
+            qreal mx = p.elementAt(i).x;
+            if (qAbs(pos.x() - mx) <= tol && pos.y() >= y0 - tol && pos.y() <= y1 + tol)
+                return true;
+        }
+    }
+    return false;
+}
+
+int PlcOpenViewer::nearWireHorizSeg(const FbdConn& c, const QPointF& pos, qreal tol) const
+{
+    if (!c.wire) return 0;
+    QPainterPath p = c.wire->path();
+    int n = p.elementCount();
+    // 收集所有水平线段（dy ≈ 0）
+    QVector<int> hSegs;
+    for (int i = 0; i < n-1; ++i) {
+        qreal dy = qAbs(p.elementAt(i+1).y - p.elementAt(i).y);
+        if (dy < 1.0)
+            hSegs << i;
+    }
+    // 对每段判断 pos 是否在上面
+    for (int k = 0; k < hSegs.size(); ++k) {
+        int  i  = hSegs[k];
+        qreal y  = p.elementAt(i).y;
+        qreal x0 = qMin(p.elementAt(i).x, p.elementAt(i+1).x);
+        qreal x1 = qMax(p.elementAt(i).x, p.elementAt(i+1).x);
+        if ((x1 - x0) < 2.0) continue;          // 退化线段，跳过
+        if (qAbs(pos.y() - y) <= tol && pos.x() >= x0-tol && pos.x() <= x1+tol) {
+            // 第一条 = src 侧，最后一条 = dst 侧
+            return (k == 0) ? 1 : 2;
+        }
+    }
+    return 0;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 鼠标事件覆盖：导线确认绑定 + 线段拖拽 + 端点重连
+// ═══════════════════════════════════════════════════════════════
+
+void PlcOpenViewer::mousePressEvent(QGraphicsSceneMouseEvent* event)
+{
+    const QPointF pos = event->scenePos();
+
+    // ── Mode_AddWire: 全部拦截（多折点画线）──────────────────────
+    if (m_mode == Mode_AddWire) {
+        auto snapG = [](qreal v){ return qRound(v / GridSize) * (qreal)GridSize; };
+
+        if (event->button() == Qt::RightButton) {
+            // 右键：≥2 个折点则确认，否则取消
+            if (m_wirePoints.size() >= 2) {
+                // 构建最终路径
+                QPainterPath path;
+                path.moveTo(m_wirePoints[0]);
+                for (int i = 1; i < m_wirePoints.size(); ++i)
+                    path.lineTo(m_wirePoints[i]);
+
+                WireItem* wire = m_tempWire;
+                m_tempWire = nullptr;
+                removeItem(wire);   // AddWireCmd/AddItemCmd 的 redo 会重新 addItem
+                wire->setPath(path);
+
+                PortRef srcPort = findPortAt(m_wirePoints.first(), 20.0);
+                PortRef dstPort = findPortAt(m_wirePoints.last(),  20.0);
+
+                if (m_wirePoints.size() == 2 && srcPort.valid() && dstPort.valid()) {
+                    int     sid = srcPort.isOutput ? srcPort.lid : dstPort.lid;
+                    QString sp  = srcPort.isOutput ? srcPort.param : dstPort.param;
+                    int     did = srcPort.isOutput ? dstPort.lid : srcPort.lid;
+                    QString dp  = srcPort.isOutput ? dstPort.param : srcPort.param;
+                    FbdConn conn{ sid, sp, did, dp, nullptr, qQNaN() };
+                    m_undoStack->push(new AddWireCmd(this, wire, conn));
+                } else {
+                    m_undoStack->push(new AddItemCmd(this, wire, "Add Wire"));
+                }
+            } else {
+                // 点数不足：取消
+                if (m_tempWire) {
+                    removeItem(m_tempWire);
+                    delete m_tempWire;
+                    m_tempWire = nullptr;
+                }
+            }
+            m_wirePoints.clear();
+            m_showPortSnap = false;
+            update();
+            event->accept();
+            return;
+        }
+
+        if (event->button() == Qt::LeftButton) {
+            QPointF snap = snapToNearestPort(pos, 20.0);
+            if (snap == pos)
+                snap = QPointF(snapG(pos.x()), snapG(pos.y()));
+
+            if (m_wirePoints.isEmpty()) {
+                // 第一个折点：创建预览导线
+                m_wirePoints << snap;
+                m_tempWire = new WireItem(snap, snap);
+                addItem(m_tempWire);
+            } else {
+                // 追加折点，更新预览路径
+                m_wirePoints << snap;
+                QPainterPath path;
+                path.moveTo(m_wirePoints[0]);
+                for (int i = 1; i < m_wirePoints.size(); ++i)
+                    path.lineTo(m_wirePoints[i]);
+                if (m_tempWire) m_tempWire->setPath(path);
+            }
+            m_showPortSnap = snapToNearestPort(pos, 20.0) != pos;
+            m_portSnapPos  = snap;
+            event->accept();
+            return;
+        }
+
+        // 其他按键在画线模式下忽略
+        event->accept();
+        return;
+    }
+
+    if (event->button() != Qt::LeftButton) {
+        LadderScene::mousePressEvent(event);
+        return;
+    }
+
+    // ── 2. Select 模式：检测端点拖拽 & 线段拖拽 ─────────────────
+    if (m_mode == Mode_Select) {
+        // 端点优先：8 px 以内
+        for (int i = 0; i < m_connections.size(); ++i) {
+            const FbdConn& c = m_connections[i];
+            if (!c.wire || c.wire->scene() != this) continue;
+            QPointF srcPt = getOutputPortScene(c.srcId, c.srcParam);
+            QPointF dstPt = getInputPortScene (c.dstId, c.dstParam);
+            auto dist = [&](const QPointF& a){ return QLineF(pos, a).length(); };
+            if (dist(srcPt) < 8.0) {
+                m_epDragIdx     = i;
+                m_epDragIsSrc   = true;
+                m_epDragOldConn = c;
+                event->accept();
+                return;
+            }
+            if (dist(dstPt) < 8.0) {
+                m_epDragIdx     = i;
+                m_epDragIsSrc   = false;
+                m_epDragOldConn = c;
+                event->accept();
+                return;
+            }
+        }
+        // 垂直线段拖拽（左右）
+        for (int i = 0; i < m_connections.size(); ++i) {
+            if (!m_connections[i].wire) continue;
+            if (nearWireVertSeg(m_connections[i], pos)) {
+                m_segDragIdx     = i;
+                const QPainterPath& p = m_connections[i].wire->path();
+                // 找路径中第一条垂直段的 x 作为 oldMidX
+                int pn = p.elementCount();
+                qreal oldMx = 0.0;
+                for (int k = 0; k < pn-1; ++k) {
+                    if (qAbs(p.elementAt(k+1).x - p.elementAt(k).x) < 1.0) {
+                        oldMx = p.elementAt(k).x; break;
+                    }
+                }
+                m_segDragOldMidX = oldMx;
+                event->accept();
+                return;
+            }
+        }
+        // 水平线段拖拽（上下）
+        for (int i = 0; i < m_connections.size(); ++i) {
+            if (!m_connections[i].wire) continue;
+            int side = nearWireHorizSeg(m_connections[i], pos);
+            if (side != 0) {
+                m_horizDragIdx   = i;
+                m_horizDragIsSrc = (side == 1);
+                // 当前 jog 值（NaN 表示尚未设置，此时取端口高度）
+                const FbdConn& c = m_connections[i];
+                if (m_horizDragIsSrc) {
+                    m_horizDragOldY = qIsNaN(c.srcJogY)
+                        ? getOutputPortScene(c.srcId, c.srcParam).y()
+                        : c.srcJogY;
+                } else {
+                    m_horizDragOldY = qIsNaN(c.dstJogY)
+                        ? getInputPortScene(c.dstId, c.dstParam).y()
+                        : c.dstJogY;
+                }
+                event->accept();
+                return;
+            }
+        }
+    }
+
+    LadderScene::mousePressEvent(event);
+}
+
+void PlcOpenViewer::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
+{
+    const QPointF pos = event->scenePos();
+
+    // ── 端点拖拽 ────────────────────────────────────────────────
+    if (m_epDragIdx >= 0) {
+        const QPointF snap = snapToNearestPort(pos, 20.0);
+        m_portSnapPos  = snap;
+        m_showPortSnap = (snap != pos);
+        FbdConn& c = m_connections[m_epDragIdx];
+        QPainterPath path;
+        if (m_epDragIsSrc) {
+            QPointF dst = getInputPortScene(c.dstId, c.dstParam);
+            qreal midX  = (snap.x() + dst.x()) / 2.0;
+            path.moveTo(snap);
+            path.lineTo(midX, snap.y());
+            path.lineTo(midX, dst.y());
+            path.lineTo(dst);
+        } else {
+            QPointF src = getOutputPortScene(c.srcId, c.srcParam);
+            qreal midX  = (src.x() + snap.x()) / 2.0;
+            path.moveTo(src);
+            path.lineTo(midX, src.y());
+            path.lineTo(midX, snap.y());
+            path.lineTo(snap);
+        }
+        if (c.wire) c.wire->setPath(path);
+        update();
+        return;
+    }
+
+    // ── 垂直线段拖拽（左右） ─────────────────────────────────────
+    if (m_segDragIdx >= 0) {
+        qreal newMidX = qRound(pos.x() / GridSize) * (qreal)GridSize;
+        FbdConn& c = m_connections[m_segDragIdx];
+        c.customMidX = newMidX;
+        QPointF src = getOutputPortScene(c.srcId, c.srcParam);
+        QPointF dst = getInputPortScene (c.dstId, c.dstParam);
+        if (src.x() > -1e8 && dst.x() > -1e8)
+            c.wire->setPath(buildWirePath(src, dst, newMidX, c.srcJogY, c.dstJogY));
+        for (auto* v : views()) v->setCursor(Qt::SizeHorCursor);
+        update();
+        return;
+    }
+
+    // ── 水平线段拖拽（上下） ─────────────────────────────────────
+    if (m_horizDragIdx >= 0) {
+        qreal newY = qRound(pos.y() / GridSize) * (qreal)GridSize;
+        FbdConn& c = m_connections[m_horizDragIdx];
+        if (m_horizDragIsSrc) c.srcJogY = newY; else c.dstJogY = newY;
+        QPointF src = getOutputPortScene(c.srcId, c.srcParam);
+        QPointF dst = getInputPortScene (c.dstId, c.dstParam);
+        qreal midX  = qIsNaN(c.customMidX) ? (src.x() + dst.x()) / 2.0 : c.customMidX;
+        if (src.x() > -1e8 && dst.x() > -1e8)
+            c.wire->setPath(buildWirePath(src, dst, midX, c.srcJogY, c.dstJogY));
+        for (auto* v : views()) v->setCursor(Qt::SizeVerCursor);
+        update();
+        return;
+    }
+
+    // ── 悬停反馈：改变光标 ──────────────────────────────────────
+    if (m_mode == Mode_Select) {
+        Qt::CursorShape cur = Qt::ArrowCursor;
+        for (const FbdConn& c : m_connections) {
+            if (!c.wire || c.wire->scene() != this) continue;
+            if (nearWireVertSeg(c, pos))         { cur = Qt::SizeHorCursor; break; }
+            if (nearWireHorizSeg(c, pos) != 0)   { cur = Qt::SizeVerCursor; break; }
+            QPointF srcPt = getOutputPortScene(c.srcId, c.srcParam);
+            QPointF dstPt = getInputPortScene (c.dstId, c.dstParam);
+            if (QLineF(pos, srcPt).length() < 8.0 ||
+                QLineF(pos, dstPt).length() < 8.0)
+            { cur = Qt::CrossCursor; break; }
+        }
+        for (auto* v : views()) v->setCursor(cur);
+    }
+
+    // ── 折线画线预览：有积累折点时更新预览路径 ──────────────────
+    if (m_mode == Mode_AddWire && !m_wirePoints.isEmpty() && m_tempWire) {
+        QPointF snap = snapToNearestPort(pos, 20.0);
+        if (snap == pos) {
+            auto snapG = [](qreal v){ return qRound(v / GridSize) * (qreal)GridSize; };
+            snap = QPointF(snapG(pos.x()), snapG(pos.y()));
+        }
+        m_showPortSnap = (snap != pos);
+        m_portSnapPos  = snap;
+        QPainterPath p;
+        p.moveTo(m_wirePoints[0]);
+        for (int i = 1; i < m_wirePoints.size(); ++i)
+            p.lineTo(m_wirePoints[i]);
+        p.lineTo(snap);
+        m_tempWire->setPath(p);
+        update();
+        return;  // 跳过 LadderScene（防止 setEndPos 覆盖自定义路径）
+    }
+
+    LadderScene::mouseMoveEvent(event);
+}
+
+void PlcOpenViewer::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
+{
+    if (event->button() != Qt::LeftButton) {
+        LadderScene::mouseReleaseEvent(event);
+        return;
+    }
+
+    // ── 端点拖拽结束 ────────────────────────────────────────────
+    if (m_epDragIdx >= 0) {
+        const QPointF snap = snapToNearestPort(event->scenePos(), 20.0);
+        PortRef newPort = findPortAt(snap, 20.0);
+
+        FbdConn& c = m_connections[m_epDragIdx];
+        FbdConn newConn = m_epDragOldConn;
+        newConn.wire    = c.wire;
+        bool valid = false;
+
+        if (newPort.valid()) {
+            if (m_epDragIsSrc && newPort.isOutput
+                && newPort.lid != m_epDragOldConn.dstId) {
+                newConn.srcId   = newPort.lid;
+                newConn.srcParam = newPort.param;
+                valid = true;
+            } else if (!m_epDragIsSrc && !newPort.isOutput
+                       && newPort.lid != m_epDragOldConn.srcId) {
+                newConn.dstId   = newPort.lid;
+                newConn.dstParam = newPort.param;
+                valid = true;
+            }
+        }
+
+        if (valid) {
+            FbdConn oldConn = m_epDragOldConn;
+            oldConn.wire    = c.wire;
+            m_undoStack->push(new MoveWireEndpointCmd(this, c.wire, oldConn, newConn));
+        } else {
+            // 恢复原连接
+            c = m_epDragOldConn;
+            updateAllWires();
+        }
+        m_epDragIdx    = -1;
+        m_showPortSnap = false;
+        for (auto* v : views()) v->setCursor(Qt::ArrowCursor);
+        update();
+        return;
+    }
+
+    // ── 垂直线段拖拽结束 ─────────────────────────────────────────
+    if (m_segDragIdx >= 0) {
+        qreal newMidX = m_connections[m_segDragIdx].customMidX;
+        if (!qIsNaN(newMidX) && qAbs(newMidX - m_segDragOldMidX) > 1.0) {
+            m_undoStack->push(new MoveWireSegmentCmd(
+                this, m_connections[m_segDragIdx].wire,
+                m_segDragOldMidX, newMidX));
+        } else {
+            m_connections[m_segDragIdx].customMidX = qQNaN();
+            updateAllWires();
+        }
+        m_segDragIdx = -1;
+        for (auto* v : views()) v->setCursor(Qt::ArrowCursor);
+        return;
+    }
+
+    // ── 水平线段拖拽结束 ─────────────────────────────────────────
+    if (m_horizDragIdx >= 0) {
+        FbdConn& c = m_connections[m_horizDragIdx];
+        qreal newY = m_horizDragIsSrc ? c.srcJogY : c.dstJogY;
+        if (!qIsNaN(newY) && qAbs(newY - m_horizDragOldY) > 1.0) {
+            m_undoStack->push(new MoveWireHorizCmd(
+                this, c.wire, m_horizDragIsSrc, m_horizDragOldY, newY));
+        } else {
+            // 未移动 → 恢复原值
+            if (m_horizDragIsSrc) c.srcJogY = qIsNaN(m_horizDragOldY) ? qQNaN() : m_horizDragOldY;
+            else                  c.dstJogY = qIsNaN(m_horizDragOldY) ? qQNaN() : m_horizDragOldY;
+            updateAllWires();
+        }
+        m_horizDragIdx = -1;
+        for (auto* v : views()) v->setCursor(Qt::ArrowCursor);
+        return;
+    }
+
+    LadderScene::mouseReleaseEvent(event);
+}
+
+// keyPressEvent: Escape 清除折线画线状态，其余交给 LadderScene
+void PlcOpenViewer::keyPressEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Escape && m_mode == Mode_AddWire) {
+        m_wirePoints.clear();
+        // LadderScene::keyPressEvent 会清理 m_tempWire 并切换到 Mode_Select
+    }
+    LadderScene::keyPressEvent(event);
+}
+
+// drawForeground: 在继承的端口吸附指示器基础上，画出导线端点小圆圈
+void PlcOpenViewer::drawForeground(QPainter* painter, const QRectF& rect)
+{
+    LadderScene::drawForeground(painter, rect);   // 端口吸附绿圈
+
+    if (m_mode != Mode_Select) return;
+    // 在每条连接导线的两个端点画蓝色小圆，提示可拖拽
+    painter->setPen(QPen(QColor("#0078D7"), 1.2));
+    painter->setBrush(QColor("#FFFFFF"));
+    const qreal r = 3.5;
+    for (const FbdConn& c : m_connections) {
+        if (!c.wire || c.wire->scene() != this) continue;
+        QPointF srcPt = getOutputPortScene(c.srcId, c.srcParam);
+        QPointF dstPt = getInputPortScene (c.dstId, c.dstParam);
+        if (srcPt.x() > -1e8) painter->drawEllipse(srcPt, r, r);
+        if (dstPt.x() > -1e8) painter->drawEllipse(dstPt, r, r);
+    }
 }
 
 QDomElement PlcOpenViewer::findElemById(const QDomElement& root, int lid)
