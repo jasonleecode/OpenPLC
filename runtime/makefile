@@ -1,8 +1,21 @@
 # Makefile — TiZi PLC Runtime A (宿主固件)
 #
 # 构建目标：firmware.bin → 烧录到 Flash A (0x00000000, 16KB)
-# 用户逻辑：在 user_logic/ 子目录下独立构建，生成 user_logic.bin
-#           由上位机通过 UART 协议下载到 Flash B (0x00004000, 16KB)
+#
+# 构建模式（MODE 变量）：
+#   MODE=NCC    (默认) Native Code Compiler — B 区为 arm-none-eabi-gcc 编译的原生 ARM 固件
+#   MODE=XCODE          XCODE —— B 区为 WASM 字节码，Runtime A 内嵌 WAMR 解释执行
+#
+# 示例：
+#   make                    → NCC 模式
+#   make MODE=XCODE         → XCODE 模式（需要 WAMR 库已构建）
+#   make user               → 构建 UserLogic B（NCC）
+#   make user MODE=XCODE    → 构建 UserLogic B（XCODE，调用 editor 的 WASM 编译流程）
+
+# -----------------------------------------------------------------------
+# 构建模式选择
+# -----------------------------------------------------------------------
+MODE ?= NCC
 
 # 输出目录
 OUTPUT_DIR := build
@@ -17,10 +30,12 @@ CXX  = $(TRGT)g++
 CP   = $(TRGT)objcopy
 DUMP = $(TRGT)objdump
 
-# 编译选项
-#   -I./            使 shared_interface.h 可通过 #include "shared_interface.h" 找到
-#   -I./bsp/include 使 bsp 头文件可找到
-#   -I./bsp/lpc_chip 供 lpc_chip 内部互相引用
+# WAMR 仓库路径（XCODE 模式使用；可通过命令行覆盖）
+WAMR_ROOT ?= ../library/wasm
+
+# -----------------------------------------------------------------------
+# 编译选项（公共）
+# -----------------------------------------------------------------------
 CFLAGS   = -mcpu=cortex-m0plus -mthumb -mfloat-abi=soft
 CFLAGS  += -I./ -I./bsp -I./bsp/include -I./bsp/lpc_chip
 CFLAGS  += -Os -ggdb
@@ -29,7 +44,6 @@ CFLAGS  += -Wall -Wextra
 CXXFLAGS = $(CFLAGS) -fno-rtti -fno-exceptions
 
 # 链接选项
-#   -Wl,--gc-sections 配合 -ffunction-sections 去除未引用的代码
 LDFLAGS  = -Wl,--script=./bsp/include/lpc824.ld
 LDFLAGS += -nostartfiles -mfloat-abi=soft -nolibc
 LDFLAGS += -Wl,--gc-sections
@@ -39,7 +53,61 @@ vpath %.c bsp/lpc_chip app
 vpath %.h bsp/lpc_chip bsp/include app
 
 # -----------------------------------------------------------------------
-# Runtime A 源文件列表
+# NCC 模式（默认）：原生 ARM 代码，UserLogic_t 接口表
+# -----------------------------------------------------------------------
+ifeq ($(MODE), NCC)
+    CFLAGS += -DNCC_MODE=1
+    $(info [Mode] NCC — UserLogic B is native ARM code.)
+endif
+
+# -----------------------------------------------------------------------
+# XCODE 模式：内嵌 WAMR，B 区存放 .wasm 字节码
+# -----------------------------------------------------------------------
+ifeq ($(MODE), XCODE)
+    CFLAGS += -DXCODE_MODE=1
+
+    # WAMR 解释器（纯解释模式，不使用 AOT/JIT）
+    CFLAGS += -DWASM_ENABLE_INTERP=1
+    CFLAGS += -DWASM_ENABLE_AOT=0
+    CFLAGS += -DWASM_ENABLE_FAST_JIT=0
+    CFLAGS += -DWASM_ENABLE_JIT=0
+    CFLAGS += -DWASM_ENABLE_LIBC_BUILTIN=0
+    CFLAGS += -DWASM_ENABLE_LIBC_WASI=0
+    CFLAGS += -DWASM_ENABLE_MULTI_MODULE=0
+    CFLAGS += -DWASM_ENABLE_THREAD_MGR=0
+
+    # WAMR 头文件路径
+    CFLAGS += -I$(WAMR_ROOT)/core/iwasm/include
+    CFLAGS += -I$(WAMR_ROOT)/core/shared/include
+    CFLAGS += -I$(WAMR_ROOT)/core/shared/platform/include
+    CFLAGS += -I$(WAMR_ROOT)/core/shared/mem-alloc
+
+    # WAMR 核心源文件（解释模式最小集合）
+    WAMR_SOURCES := \
+        $(WAMR_ROOT)/core/iwasm/interpreter/wasm_interp_classic.c   \
+        $(WAMR_ROOT)/core/iwasm/interpreter/wasm_loader.c            \
+        $(WAMR_ROOT)/core/iwasm/common/wasm_runtime_common.c         \
+        $(WAMR_ROOT)/core/iwasm/common/wasm_native.c                 \
+        $(WAMR_ROOT)/core/iwasm/common/wasm_exec_env.c               \
+        $(WAMR_ROOT)/core/iwasm/common/wasm_memory.c                 \
+        $(WAMR_ROOT)/core/shared/mem-alloc/ems/ems_alloc.c           \
+        $(WAMR_ROOT)/core/shared/mem-alloc/ems/ems_hmu.c             \
+        $(WAMR_ROOT)/core/shared/mem-alloc/ems/ems_kfc.c             \
+        $(WAMR_ROOT)/core/shared/mem-alloc/mem_alloc.c               \
+        $(WAMR_ROOT)/core/shared/utils/bh_common.c                   \
+        $(WAMR_ROOT)/core/shared/utils/bh_log.c                      \
+        $(WAMR_ROOT)/core/shared/utils/bh_list.c                     \
+        $(WAMR_ROOT)/core/shared/utils/bh_vector.c
+
+    # XCODE 专用运行器（WAMR 初始化 + plc_init/plc_run 调用）
+    XCODE_SOURCES := app/xcode_runner.c
+
+    $(info [Mode] XCODE — UserLogic B is WASM bytecode, executed via WAMR.)
+    $(info [WAMR] $(WAMR_ROOT))
+endif
+
+# -----------------------------------------------------------------------
+# Runtime A 源文件列表（两种模式共用）
 # -----------------------------------------------------------------------
 SOURCE_FILES := \
     app/main.c        \
@@ -83,6 +151,11 @@ SOURCE_FILES := \
     wkt_8xx.c         \
     wwdt_8xx.c
 
+# XCODE 模式追加 WAMR 源文件和 xcode_runner
+ifeq ($(MODE), XCODE)
+    SOURCE_FILES += $(WAMR_SOURCES) $(XCODE_SOURCES)
+endif
+
 # 目标文件列表（保留子目录路径）
 OBJECT_FILES := $(addprefix $(OUTPUT_DIR)/, $(patsubst %.c, %.o, $(SOURCE_FILES)))
 
@@ -93,7 +166,7 @@ OBJECT_FILES := $(addprefix $(OUTPUT_DIR)/, $(patsubst %.c, %.o, $(SOURCE_FILES)
 
 all: $(OUTPUT_DIR) firmware.elf firmware.bin
 	@echo ""
-	@echo "=== Runtime A build complete ==="
+	@echo "=== Runtime A build complete [MODE=$(MODE)] ==="
 	@$(TRGT)size firmware.elf
 	@echo "Binary: firmware.bin  (flash to 0x00000000)"
 

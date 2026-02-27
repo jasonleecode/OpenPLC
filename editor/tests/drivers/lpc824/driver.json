@@ -1,6 +1,7 @@
 {
   "name": "NXP LPC824 (Cortex-M0+)",
-  "description": "NXP LPC824M201JDH20 — 32KB Flash / 8KB SRAM, Cortex-M0+",
+  "description": "NXP LPC824M201JDH20 — 32KB Flash / 8KB SRAM, Cortex-M0+. RAM 太小无法运行 WAMR，仅支持 NCC 模式。",
+  "mode": "NCC",
   "target_type": "Embedded",
   "mcu": "LPC824M201JDH20",
   "arch": "ARM Cortex-M0+",
@@ -17,35 +18,37 @@
     "user_ram_size_kb": 4
   },
   "compiler": {
-    "cc": "arm-none-eabi-gcc",
-    "cflags": [
-      "-mcpu=cortex-m0plus",
-      "-mthumb",
-      "-mfloat-abi=soft",
-      "-Os",
-      "-ffunction-sections",
-      "-fdata-sections",
-      "-nostartfiles",
-      "--specs=nosys.specs",
-      "--specs=nano.specs",
-      "-w"
-    ],
-    "ldflags": [
-      "-Wl,--gc-sections",
-      "-lm",
-      "-lc",
-      "-lgcc"
-    ],
-    "linker_script": "linker/lpc824_user.ld",
-    "include_dirs": ["include"],
-    "template": "templates/user_logic_wrapper.c",
-    "output_name": "user_logic",
-    "output_suffix": ".elf"
-  },
-  "post_build": {
-    "objcopy": "arm-none-eabi-objcopy",
-    "format": "binary",
-    "output_suffix": ".bin",
-    "max_size_bytes": 16384
+    "ncc": {
+      "cc": "arm-none-eabi-gcc",
+      "cflags": [
+        "-mcpu=cortex-m0plus",
+        "-mthumb",
+        "-mfloat-abi=soft",
+        "-Os",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-nostartfiles",
+        "--specs=nosys.specs",
+        "--specs=nano.specs",
+        "-w"
+      ],
+      "ldflags": [
+        "-Wl,--gc-sections",
+        "-lm",
+        "-lc",
+        "-lgcc"
+      ],
+      "linker_script": "linker/lpc824_user.ld",
+      "include_dirs": ["include"],
+      "template": "templates/user_logic_wrapper.c",
+      "output_name": "user_logic",
+      "output_suffix": ".elf",
+      "post_build": {
+        "objcopy": "arm-none-eabi-objcopy",
+        "format": "binary",
+        "output_suffix": ".bin",
+        "max_size_bytes": 16384
+      }
+    }
   }
 }

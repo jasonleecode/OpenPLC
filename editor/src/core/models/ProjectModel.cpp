@@ -37,6 +37,8 @@ void ProjectModel::clear() {
     modificationDateTime.clear();
     // build settings
     targetType = "Linux";
+    driver.clear();
+    mode       = "NCC";
     compiler   = "gcc";
     cflags.clear();
     linker     = "gcc";
@@ -97,8 +99,13 @@ bool ProjectModel::saveTiZiNative(const QString& path) {
     doc.appendChild(pi);
 
     QDomElement root = doc.createElement("TiZiProject");
-    root.setAttribute("name", projectName);
+    root.setAttribute("name",    projectName);
     root.setAttribute("version", "1");
+    // 构建设置
+    root.setAttribute("targetType", targetType);
+    root.setAttribute("mode",       mode);
+    if (!driver.isEmpty())
+        root.setAttribute("driver", driver);
     doc.appendChild(root);
 
     for (PouModel* pou : pous) {
@@ -186,6 +193,8 @@ bool ProjectModel::savePlcOpen(const QString& path) {
         else docRoot.appendChild(buildEl);
     }
     buildEl.setAttribute("targetType", targetType);
+    buildEl.setAttribute("driver",     driver);
+    buildEl.setAttribute("mode",       mode);
     buildEl.setAttribute("compiler",   compiler);
     buildEl.setAttribute("cflags",     cflags);
     buildEl.setAttribute("linker",     linker);
@@ -287,6 +296,9 @@ bool ProjectModel::loadFromFile(const QString& path) {
         return false;
 
     projectName = root.attribute("name", "Untitled");
+    targetType  = root.attribute("targetType", "Linux");
+    mode        = root.attribute("mode", "NCC");
+    driver      = root.attribute("driver");
 
     QDomNodeList pouNodes = root.elementsByTagName("pou");
     for (int i = 0; i < pouNodes.count(); ++i) {
@@ -349,6 +361,8 @@ bool ProjectModel::loadPlcOpenXml(const QDomDocument& doc, const QString& path)
     QDomElement build = root.firstChildElement("TiZiBuild");
     if (!build.isNull()) {
         targetType = build.attribute("targetType", "Linux");
+        driver     = build.attribute("driver");
+        mode       = build.attribute("mode", "NCC");
         compiler   = build.attribute("compiler",   "gcc");
         cflags     = build.attribute("cflags");
         linker     = build.attribute("linker",     "gcc");

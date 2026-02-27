@@ -7,6 +7,10 @@
  *   - 通过 UART 接收上位机的下载/控制命令
  *   - 加载并调用 B 区（USER_FLASH_BASE）的用户逻辑
  *
+ * 构建模式（由 Makefile 的 MODE 变量注入宏）：
+ *   NCC_MODE=1    默认。B 区为原生 ARM 固件，通过 UserLogic_t 接口表调用。
+ *   XCODE_MODE=1  B 区为 WASM 字节码，由内嵌 WAMR 加载并执行。
+ *
  * 内存分区：
  *   Runtime A: Flash 0x00000000 (16KB), RAM 0x10000000 (4KB)
  *   UserLogic B: Flash 0x00004000 (16KB), RAM 0x10001000 (4KB)
@@ -90,6 +94,14 @@ static const SystemAPI_t s_sapi = {
 void Runtime_HandleUARTByte(uint8_t byte);
 
 /* -----------------------------------------------------------------------
+ * XCODE 模式：xcode_runner.c 中实现
+ * -----------------------------------------------------------------------*/
+#if defined(XCODE_MODE)
+bool xcode_runner_init(const SystemAPI_t *api);
+void xcode_runner_loop(uint32_t tick_ms);
+#endif
+
+/* -----------------------------------------------------------------------
  * PLC GPIO 初始化
  * -----------------------------------------------------------------------*/
 static void plc_gpio_init(void)
@@ -153,7 +165,21 @@ int main(void)
     Board_UARTPutSTR("Flash A: 0x00000000 (16KB)  RAM A: 0x10000000 (4KB)\r\n");
     Board_UARTPutSTR("Flash B: 0x00004000 (16KB)  RAM B: 0x10001000 (4KB)\r\n");
 
-    /* --- 检查 B 区是否有合法的用户逻辑 --- */
+#if defined(XCODE_MODE)
+    /* ---- XCODE 模式：加载 B 区 .wasm，通过 WAMR 执行 ---- */
+    Board_UARTPutSTR("Mode: XCODE (WASM/WAMR)\r\n");
+    if (xcode_runner_init(&s_sapi)) {
+        plc_running = true;
+        Board_UARTPutSTR("WASM PLC started. Scan period: ");
+        uart_put_u32(s_scan_ms);
+        Board_UARTPutSTR(" ms\r\n");
+    } else {
+        Board_UARTPutSTR("No valid WASM in Flash B.\r\n");
+        Board_UARTPutSTR("Waiting for download via UART...\r\n");
+    }
+#else
+    /* ---- NCC 模式（默认）：读取 B 区原生 UserLogic_t 接口表 ---- */
+    Board_UARTPutSTR("Mode: NCC (native)\r\n");
     const UserLogic_t *user = (const UserLogic_t *)USER_FLASH_BASE;
 
     if (user->magic == USER_LOGIC_MAGIC) {
@@ -181,6 +207,7 @@ int main(void)
         Board_UARTPutSTR("No UserLogic (magic mismatch).\r\n");
         Board_UARTPutSTR("Waiting for download via UART...\r\n");
     }
+#endif
 
     /* --- 启动 SysTick --- */
     SysTick_Config(SystemCoreClock / TICKRATE_HZ);
@@ -197,15 +224,21 @@ int main(void)
         if (s_scan_flag) {
             s_scan_flag = false;
 
-            if (plc_running && (user->magic == USER_LOGIC_MAGIC)) {
+            if (plc_running) {
                 uint32_t t0 = s_tick_ms;
 
-                /* 调用用户逻辑的循环函数 */
-                user->loop();
-
+#if defined(XCODE_MODE)
+                /* XCODE 模式：通过 WAMR 执行 plc_run(ms) */
+                xcode_runner_loop(s_tick_ms);
+#else
+                /* NCC 模式：调用原生用户逻辑 */
+                if (user->magic == USER_LOGIC_MAGIC) {
+                    user->loop();
+                }
+#endif
                 /* 记录本次扫描耗时（近似，单位 ms，*1000 得 us） */
                 plc_scan_time_us = (s_tick_ms - t0) * 1000u;
-            } else if (!plc_running) {
+            } else {
                 /* 停止状态：确保所有输出安全关闭 */
                 plc_outputs_clear();
             }

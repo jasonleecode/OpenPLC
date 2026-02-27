@@ -1,15 +1,37 @@
 {
   "name": "macOS (Apple Silicon / x86_64)",
-  "description": "macOS desktop target — compiled with GCC/Clang, POSIX runtime",
+  "description": "macOS desktop target. 支持 NCC（GCC/Clang 原生）和 XCODE（WASM/WAMR）两种模式。",
+  "mode": ["NCC", "XCODE"],
   "target_type": "Mac",
   "arch": "universal",
   "compiler": {
-    "cc": "gcc",
-    "cflags": ["-w"],
-    "ldflags": ["-lm"],
-    "include_dirs": [],
-    "template": "templates/plc_main.c",
-    "output_name": "plc_program",
-    "output_suffix": ""
+    "ncc": {
+      "cc": "gcc",
+      "cflags": ["-w"],
+      "ldflags": ["-lm"],
+      "include_dirs": [],
+      "template": "templates/plc_main.c",
+      "output_name": "plc_program",
+      "output_suffix": ""
+    },
+    "xcode": {
+      "cflags": [
+        "--target=wasm32-wasi",
+        "-Os",
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-w"
+      ],
+      "ldflags": [
+        "-Wl,--no-entry",
+        "-Wl,--export=plc_init",
+        "-Wl,--export=plc_run",
+        "-Wl,--allow-undefined"
+      ],
+      "include_dirs": [],
+      "template": "templates/plc_wasm_main.c",
+      "output_name": "plc_program",
+      "output_suffix": ".wasm"
+    }
   }
 }

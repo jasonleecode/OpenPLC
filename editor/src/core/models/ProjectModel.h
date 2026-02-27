@@ -26,6 +26,8 @@ public:
 
     // ── 构建设置（TiZiBuild 扩展元素）──────────────────────────
     QString targetType = "Linux";
+    QString driver;        // driver 目录名（如 "macos"）；空则按 targetType 自动选择
+    QString mode = "NCC";  // 编译模式："NCC" 或 "XCODE"；受 driver 支持范围约束
     QString compiler   = "gcc";
     QString cflags;
     QString linker     = "gcc";

@@ -178,6 +178,9 @@ void MainWindow::setupMenuBar()
     fileMenu->addAction("Save",           this, &MainWindow::saveProject);
     fileMenu->addAction("Save As...",     this, &MainWindow::saveProjectAs);
     fileMenu->addSeparator();
+    fileMenu->addAction(QIcon(":/images/Properties.png"),
+                        "Project Settings...", this, &MainWindow::openProjectProperties);
+    fileMenu->addSeparator();
     fileMenu->addAction("Exit", this, &QWidget::close);
 
     QMenu* editMenu = menuBar()->addMenu("Edit(&E)");
@@ -1192,6 +1195,93 @@ QWidget* MainWindow::createProjectPropertiesWidget()
     buildForm->setContentsMargins(8, 10, 8, 10);
     buildForm->setSpacing(6);
 
+    // ── Driver 下拉列表（从 drivers 目录动态枚举）───────────────
+    auto* driverCombo = new QComboBox();
+    driverCombo->addItem("(auto — by Target Type)", QString());  // 空 = 自动
+    {
+        QStringList driverRoots = {
+            QCoreApplication::applicationDirPath() + "/drivers",
+            QString(DRIVERS_DIR),
+        };
+        QSet<QString> seen;
+        for (const QString& root : driverRoots) {
+            for (const QFileInfo& fi : QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+                if (seen.contains(fi.fileName())) continue;
+                const QString driverJson = fi.absoluteFilePath() + "/driver.json";
+                if (!QFileInfo::exists(driverJson)) continue;
+                seen.insert(fi.fileName());
+                // 读取 name 和 mode
+                QFile f(driverJson);
+                QString label = fi.fileName();
+                if (f.open(QFile::ReadOnly)) {
+                    QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+                    QString dName = obj["name"].toString();
+                    QString dMode = obj["mode"].toString("NCC");
+                    if (!dName.isEmpty())
+                        label = QString("%1  [%2]").arg(dName, dMode);
+                }
+                driverCombo->addItem(label, fi.fileName());
+            }
+        }
+    }
+    // 设置当前选项
+    if (m_project->driver.isEmpty()) {
+        driverCombo->setCurrentIndex(0);
+    } else {
+        int idx = driverCombo->findData(m_project->driver);
+        if (idx >= 0) driverCombo->setCurrentIndex(idx);
+    }
+
+    // ── Mode 下拉（根据所选 driver 支持的模式动态更新）────────
+    auto* modeCombo = new QComboBox();
+    modeCombo->setEnabled(false);  // 默认禁用，由 driver 决定
+
+    // 工具函数：从 driver.json 解析支持的 mode 列表
+    auto loadDriverModes = [](const QString& driverName) -> QStringList {
+        QStringList modes;
+        QStringList roots = {
+            QCoreApplication::applicationDirPath() + "/drivers",
+            QString(DRIVERS_DIR),
+        };
+        for (const QString& root : roots) {
+            const QString djPath = root + "/" + driverName + "/driver.json";
+            if (!QFileInfo::exists(djPath)) continue;
+            QFile f(djPath);
+            if (!f.open(QFile::ReadOnly)) continue;
+            QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+            QJsonValue mv = obj["mode"];
+            if (mv.isString()) {
+                modes << mv.toString();
+            } else if (mv.isArray()) {
+                for (const QJsonValue& v : mv.toArray())
+                    modes << v.toString();
+            }
+            break;
+        }
+        return modes;
+    };
+
+    // 刷新 modeCombo 的工具函数
+    auto refreshModeCombo = [this, modeCombo, loadDriverModes](const QString& driverName) {
+        modeCombo->clear();
+        QStringList modes = loadDriverModes(driverName);
+        if (modes.isEmpty()) {
+            modeCombo->addItem("NCC");
+            modeCombo->setEnabled(false);
+        } else if (modes.size() == 1) {
+            modeCombo->addItem(modes.first());
+            modeCombo->setEnabled(false);  // 硬件只支持一种，不可选
+        } else {
+            modeCombo->addItems(modes);
+            modeCombo->setEnabled(true);
+        }
+        int mi = modeCombo->findText(m_project->mode);
+        if (mi >= 0) modeCombo->setCurrentIndex(mi);
+    };
+
+    // 初始化 modeCombo
+    refreshModeCombo(m_project->driver);
+
     auto* targetCombo  = new QComboBox();
     targetCombo->addItems({"Linux", "Mac", "Windows", "Embedded"});
     targetCombo->setCurrentText(m_project->targetType);
@@ -1200,6 +1290,8 @@ QWidget* MainWindow::createProjectPropertiesWidget()
     auto* linkerEdit   = new QLineEdit(m_project->linker);
     auto* ldflagsEdit  = new QLineEdit(m_project->ldflags);
 
+    buildForm->addRow("Driver:", driverCombo);
+    buildForm->addRow("Mode:",   modeCombo);
     buildForm->addRow("Target Type:", targetCombo);
     buildForm->addRow("Compiler:",    compilerEdit);
     buildForm->addRow("CFLAGS:",      cflagsEdit);
@@ -1231,6 +1323,14 @@ QWidget* MainWindow::createProjectPropertiesWidget()
         m_project->description = descEdit->toPlainText();
         m_project->markDirty();
     });
+    connect(driverCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this, driverCombo, refreshModeCombo](int idx){
+                m_project->driver = driverCombo->itemData(idx).toString();
+                refreshModeCombo(m_project->driver);
+                m_project->markDirty();
+            });
+    connect(modeCombo, &QComboBox::currentTextChanged, this,
+            [this](const QString& v){ m_project->mode = v; m_project->markDirty(); });
     connect(targetCombo, &QComboBox::currentTextChanged, this,
             [this](const QString& v){ m_project->targetType = v; m_project->markDirty(); });
     connect(compilerEdit, &QLineEdit::textChanged, this,
@@ -1749,14 +1849,18 @@ void MainWindow::buildProject()
     // Step 4/5 + 5/5: 通过 driver 配置生成 wrapper 并编译
     // ─────────────────────────────────────────────────────────────────
 
-    // 查找 driver 目录：targetType → driver 子目录名
-    auto findDriverDir = [&](const QString& targetType) -> QString {
+    // 查找 driver 目录：
+    //   1. 优先使用 m_project->driver（用户在 Project Settings 中明确选择的 driver 名）
+    //   2. 回退到 targetType 的默认映射（向后兼容）
+    auto findDriverDir = [&](const QString& explicitDriver, const QString& targetType) -> QString {
         static const QMap<QString, QString> kTargetToDriver = {
             {"Mac",      "macos"},
             {"Linux",    "linux"},
             {"Embedded", "lpc824"},
         };
-        QString driverName = kTargetToDriver.value(targetType, targetType.toLower());
+        QString driverName = explicitDriver.isEmpty()
+            ? kTargetToDriver.value(targetType, targetType.toLower())
+            : explicitDriver;
         QStringList searchPaths = {
             QCoreApplication::applicationDirPath() + "/drivers/" + driverName,
             QDir::cleanPath(QString(DRIVERS_DIR) + "/" + driverName),
@@ -1768,7 +1872,20 @@ void MainWindow::buildProject()
         return {};
     };
 
-    const QString driverDir = findDriverDir(target);
+    // 查找 WASI-SDK 目录（XCODE 模式使用）
+    auto findWasiSdkDir = []() -> QString {
+        QStringList candidates = {
+            QCoreApplication::applicationDirPath() + "/tools/wasm/wasi-sdk",
+            QString(WASI_SDK_DIR),
+        };
+        for (const QString& p : candidates) {
+            if (QFileInfo(p + "/bin/clang").exists())
+                return p;
+        }
+        return {};
+    };
+
+    const QString driverDir = findDriverDir(m_project->driver, target);
     if (driverDir.isEmpty()) {
         m_consoleEdit->appendPlainText(
             QString("       Error: no driver found for target \"%1\".\n"
@@ -1794,12 +1911,137 @@ void MainWindow::buildProject()
             return;
         }
         driver  = doc.object();
-        compObj = driver["compiler"].toObject();
+        // 根据项目编译模式（NCC/XCODE）读取对应的 compiler 子节
+        const QString modeKey = m_project->mode.toLower(); // "ncc" or "xcode"
+        compObj = driver["compiler"][modeKey].toObject();
+        if (compObj.isEmpty()) {
+            // 回退：driver 可能仍用旧的扁平 compiler 结构
+            compObj = driver["compiler"].toObject();
+        }
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // ══ XCODE 模式：wasi-clang → .wasm 字节码 ══
+    // ─────────────────────────────────────────────────────────────────
+    if (m_project->mode == "XCODE") {
+
+        const QString wasiSdkDir = findWasiSdkDir();
+        if (wasiSdkDir.isEmpty()) {
+            m_consoleEdit->appendPlainText(
+                "       Error: WASI-SDK not found.\n"
+                "       Expected at: " + QString(WASI_SDK_DIR));
+            statusBar()->showMessage("Build failed.", 4000);
+            return;
+        }
+        m_consoleEdit->appendPlainText(QString("       WASI-SDK: %1").arg(wasiSdkDir));
+
+        // Step 4/5: 读取 WASM wrapper 模板
+        m_consoleEdit->appendPlainText("[ 4/5 ] Generating WASM wrapper from driver template ...");
+        m_consoleEdit->appendPlainText(QString("       Driver: %1  [XCODE]").arg(driver["name"].toString()));
+
+        const QString templatePath = driverDir + "/" + compObj["template"].toString();
+        QString wrapperContent;
+        {
+            QFile tmpl(templatePath);
+            if (!tmpl.open(QFile::ReadOnly | QFile::Text)) {
+                m_consoleEdit->appendPlainText("       Error: cannot read template: " + templatePath);
+                statusBar()->showMessage("Build failed.", 4000);
+                return;
+            }
+            wrapperContent = QString::fromUtf8(tmpl.readAll());
+        }
+
+        const QString outputName   = compObj["output_name"].toString("plc_program");
+        const QString outputSuffix = compObj["output_suffix"].toString(".wasm");
+        const QString wrapperFile  = buildDir + "/" + outputName + "_main.c";
+        const QString wasmFile     = buildDir + "/" + outputName + outputSuffix;
+        {
+            QFile f(wrapperFile);
+            if (!f.open(QFile::WriteOnly | QFile::Text | QFile::Truncate)) {
+                m_consoleEdit->appendPlainText("       Error: cannot write wrapper file.");
+                statusBar()->showMessage("Build failed.", 4000);
+                return;
+            }
+            f.write(wrapperContent.toUtf8());
+        }
+        m_consoleEdit->appendPlainText("       OK");
+
+        // Step 5/5: wasi-clang → .wasm
+        m_consoleEdit->appendPlainText("[ 5/5 ] Compiling to WASM (wasi-clang) ...");
+        {
+            const QString wasiClang   = wasiSdkDir + "/bin/clang";
+            const QString wasiSysroot = wasiSdkDir + "/share/wasi-sysroot";
+
+            QProcess proc;
+            QStringList args;
+
+            // sysroot + target
+            args << "--sysroot=" + wasiSysroot;
+
+            // driver cflags（含 --target=wasm32-wasi）
+            for (const QJsonValue& v : compObj["cflags"].toArray())
+                args << v.toString();
+
+            // driver include_dirs（相对 driverDir，通常为空）
+            for (const QJsonValue& v : compObj["include_dirs"].toArray())
+                args << "-I" << (driverDir + "/" + v.toString());
+
+            // matiec 头文件 + iec2c 生成的头文件
+            args << "-I" << matiecDir + "/lib/C"
+                 << "-I" << outDir;
+            // 注意：WASI sysroot 自带 time.h，不需要 -include time.h
+
+            // 源文件
+            args << wrapperFile << iecSources;
+
+            // 输出
+            args << "-o" << wasmFile;
+
+            // driver ldflags（--no-entry / --export=...）
+            for (const QJsonValue& v : compObj["ldflags"].toArray())
+                args << v.toString();
+
+            // 项目自定义标志
+            if (!m_project->cflags.isEmpty())
+                args << m_project->cflags.split(' ', Qt::SkipEmptyParts);
+            if (!m_project->ldflags.isEmpty())
+                args << m_project->ldflags.split(' ', Qt::SkipEmptyParts);
+
+            proc.start(wasiClang, args);
+            if (!proc.waitForFinished(60000)) {
+                m_consoleEdit->appendPlainText("       Error: wasi-clang timed out.");
+                statusBar()->showMessage("Build failed.", 4000);
+                return;
+            }
+            const QString ccOut = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+            const QString ccErr = QString::fromUtf8(proc.readAllStandardError()).trimmed();
+            if (!ccOut.isEmpty()) m_consoleEdit->appendPlainText(ccOut);
+            if (!ccErr.isEmpty()) m_consoleEdit->appendPlainText(ccErr);
+            if (proc.exitCode() != 0) {
+                m_consoleEdit->appendPlainText("       WASM compilation FAILED.");
+                statusBar()->showMessage("Build failed.", 4000);
+                return;
+            }
+        }
+
+        qint64 wasmSize = QFileInfo(wasmFile).size();
+        m_consoleEdit->appendPlainText("─────────────────────────────────────────");
+        m_consoleEdit->appendPlainText(
+            QString("[ Build ] SUCCESS  -->  %1  (%2 bytes)")
+            .arg(QFileInfo(wasmFile).fileName()).arg(wasmSize));
+        statusBar()->showMessage(
+            QString("Build complete -- %1 (%2 bytes)")
+            .arg(QFileInfo(wasmFile).fileName()).arg(wasmSize), 5000);
+        return;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // ══ NCC 模式：原生编译（arm-gcc / gcc）══
+    // ─────────────────────────────────────────────────────────────────
 
     // Step 4/5: 读取 wrapper 模板，写入构建目录
     m_consoleEdit->appendPlainText("[ 4/5 ] Generating wrapper from driver template ...");
-    m_consoleEdit->appendPlainText(QString("       Driver: %1").arg(driver["name"].toString()));
+    m_consoleEdit->appendPlainText(QString("       Driver: %1  [NCC]").arg(driver["name"].toString()));
 
     const QString templatePath = driverDir + "/" + compObj["template"].toString();
     QString wrapperContent;
@@ -1888,9 +2130,13 @@ void MainWindow::buildProject()
     }
 
     // post_build（可选，如 Embedded 的 objcopy .elf -> .bin）
+    // 在新的嵌套 compiler 结构中，post_build 在 compiler.ncc 内；
+    // 旧扁平结构中在顶层 driver。两处都检查，优先 compObj。
     QString finalOutput = elfFile;
-    if (driver.contains("post_build")) {
-        QJsonObject pb = driver["post_build"].toObject();
+    if (compObj.contains("post_build") || driver.contains("post_build")) {
+        QJsonObject pb = compObj.contains("post_build")
+            ? compObj["post_build"].toObject()
+            : driver["post_build"].toObject();
         const QString objcopy   = pb["objcopy"].toString();
         const QString format    = pb["format"].toString("binary");
         const QString binSuffix = pb["output_suffix"].toString(".bin");
