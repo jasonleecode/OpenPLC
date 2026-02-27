@@ -7,6 +7,7 @@
 #include "../core/models/ProjectModel.h"
 #include "../editor/scene/LadderScene.h"     // EditorMode 枚举
 
+class ProjectManager;
 class QMdiArea;
 class QMdiSubWindow;
 class QTabWidget;
@@ -57,8 +58,7 @@ private:
     void setupCentralArea();
     void setupStatusBar();   // 状态栏 PLC 状态指示器
 
-    // ---- 项目操作 ----
-    void buildDefaultProject();
+    // ---- 项目操作（委托给 ProjectManager）----
     void newProject();
     void openProject();
     void saveProject();
@@ -81,6 +81,9 @@ private:
     QWidget* createPouEditorWidget(PouModel* pou);
     QWidget* createVarDeclWidget(PouModel* pou);
     QWidget* createProjectPropertiesWidget();    // 项目属性面板
+
+    // ---- Driver 安装 ----
+    void installDriverCab(const QString& cabPath);
 
     // ---- 窗口标题 ----
     void updateWindowTitle();
@@ -105,7 +108,8 @@ private:
     bool eventFilter(QObject* obj, QEvent* ev) override;
 
     // ---- 成员变量 ----
-    ProjectModel*   m_project     = nullptr;
+    ProjectManager* m_projectManager = nullptr;
+    ProjectModel*   m_project        = nullptr;
     PlcOpenViewer*  m_scene       = nullptr;   // 当前活跃图形场景
     QMdiArea*       m_mdiArea     = nullptr;
     QTreeWidget*    m_projectTree = nullptr;

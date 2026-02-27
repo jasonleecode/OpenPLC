@@ -47,9 +47,11 @@ set(PROJECT_SOURCES
     # 入口
     src/main.cpp
     
-    # App 层 (主窗口)
+    # App 层 (主窗口 + 项目管理)
     src/app/MainWindow.cpp
     src/app/MainWindow.h
+    src/app/ProjectManager.cpp
+    src/app/ProjectManager.h
 
     # Editor 层 (我们先预留这些位置，后续会填入具体代码)
     src/editor/scene/LadderScene.cpp

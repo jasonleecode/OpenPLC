@@ -12,6 +12,7 @@
 #include "../items/CoilItem.h"
 #include "../items/FunctionBlockItem.h"
 #include "../items/BaseItem.h"
+#include "../../utils/UndoStack.h"
 
 LadderScene::LadderScene(QObject *parent)
     : QGraphicsScene(parent), m_mode(Mode_Select)
@@ -20,23 +21,33 @@ LadderScene::LadderScene(QObject *parent)
                  RightRailX + 100,
                  RailBottomY + 60);
 
-    // 颜色在 drawBackground 里从 palette 动态读取，这里仅保留字段初始化
     m_backgroundColor = QApplication::palette().base().color();
     m_gridColor       = QColor("#F0F0F0");
     m_gridColorFine   = QColor("#E0E0E0");
+
+    m_undoStack = new QUndoStack(this);
 }
 
-void LadderScene::setMode(EditorMode mode) {
+// ══════════════════════════════════════════════════════════════
+// setMode —— 切换编辑模式（含临时导线清理）
+// ══════════════════════════════════════════════════════════════
+void LadderScene::setMode(EditorMode mode)
+{
+    if (m_tempWire && mode != Mode_AddWire) {
+        removeItem(m_tempWire);
+        delete m_tempWire;
+        m_tempWire = nullptr;
+    }
+    m_showPortSnap = false;
     m_mode = mode;
     emit modeChanged(mode);
 }
 
 // ══════════════════════════════════════════════════════════════
-// drawBackground —— 点阵 + 梯级水平母线 + 电源母线 + 梯级编号
+// drawBackground —— LD 专用：点阵 + 梯级水平母线 + 电源母线 + 梯级编号
 // ══════════════════════════════════════════════════════════════
 void LadderScene::drawBackground(QPainter *painter, const QRectF &rect)
 {
-    // 动态读取当前主题背景色
     const QColor bg  = QApplication::palette().base().color();
     const bool dark  = bg.lightnessF() <= 0.5;
     painter->fillRect(rect, bg);
@@ -151,12 +162,10 @@ QPointF LadderScene::snapToNearestPort(const QPointF& pos, qreal radius) const
     };
 
     for (QGraphicsItem* gi : items()) {
-        BaseItem* bi = dynamic_cast<BaseItem*>(gi);
-        if (!bi) continue;
-
-        check(bi->leftPort());
-        check(bi->rightPort());
-
+        if (auto* bi = dynamic_cast<BaseItem*>(gi)) {
+            check(bi->leftPort());
+            check(bi->rightPort());
+        }
         if (auto* fb = dynamic_cast<FunctionBlockItem*>(gi)) {
             for (int i = 0; i < fb->inputCount();  ++i) check(fb->inputPortPos(i));
             for (int i = 0; i < fb->outputCount(); ++i) check(fb->outputPortPos(i));
@@ -166,38 +175,38 @@ QPointF LadderScene::snapToNearestPort(const QPointF& pos, qreal radius) const
 }
 
 // ══════════════════════════════════════════════════════════════
-// mousePressEvent —— 放置元件 / 画导线
+// mousePressEvent —— 放置元件 / 画导线（含 undo）
 // ══════════════════════════════════════════════════════════════
 void LadderScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
-    if (event->button() != Qt::LeftButton) {
+    if (event->button() != Qt::LeftButton || m_mode == Mode_Select) {
         QGraphicsScene::mousePressEvent(event);
-        return;
-    }
-    if (m_mode == Mode_Select) {
-        QGraphicsScene::mousePressEvent(event);
+        // 选择模式下：记录当前选中 items 的位置，供拖拽结束时对比
+        if (m_mode == Mode_Select && event->button() == Qt::LeftButton) {
+            m_dragStartPos.clear();
+            for (QGraphicsItem* gi : selectedItems())
+                m_dragStartPos[gi] = gi->pos();
+        }
         return;
     }
 
     const QPointF raw = event->scenePos();
-
-    // X: 吸附到网格
-    auto snapX = [&](qreal x) -> qreal {
-        return qRound(x / GridSize) * (qreal)GridSize;
-    };
+    auto snapG = [&](qreal v) { return qRound(v / GridSize) * (qreal)GridSize; };
+    const QPointF snapPt(snapG(raw.x()), snapG(raw.y()));
 
     // ── 导线模式（端口优先吸附） ─────────────────────────────
     if (m_mode == Mode_AddWire) {
         QPointF snap = snapToNearestPort(raw, 20.0);
-        if (snap == raw)
-            snap = { snapX(raw.x()),
-                     qRound(raw.y() / GridSize) * (qreal)GridSize };
+        if (snap == raw) snap = snapPt;
 
         if (!m_tempWire) {
+            // 第一次点击：创建预览导线，不计入 undo
             m_tempWire = new WireItem(snap, snap);
             addItem(m_tempWire);
         } else {
+            // 第二次点击：确认导线，推入 undo 命令
             m_tempWire->setEndPos(snap);
+            m_undoStack->push(new AddItemCmd(this, m_tempWire, "Add Wire"));
             m_tempWire     = nullptr;
             m_showPortSnap = false;
             update();
@@ -205,18 +214,20 @@ void LadderScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
         return;
     }
 
-    // ── 触点 / 线圈：端口对齐梯级中心 Y ─────────────────────
-    const qreal px = snapX(raw.x());
+    // ── 功能块（自由网格放置）────────────────────────────────
+    if (m_mode == Mode_AddFuncBlock) {
+        auto* fb = new FunctionBlockItem(
+            "TON", QString("TON_%1").arg(m_fbCount++));
+        fb->setPos(snapPt);
+        int fbLid = m_nextLocalId++;
+        fb->setData(0, fbLid);
+        m_items[fbLid] = fb;
+        m_undoStack->push(new AddItemCmd(this, fb, "Add Function Block"));
+        return;
+    }
 
-    // portYOffset = H/2 = 20（ContactItem 和 CoilItem 一致）
-    constexpr int portOff = 20;
-    qreal portY = raw.y() + portOff;
-    int rung = qRound((portY - RungHeight / 2.0) / RungHeight);
-    rung = qBound(0, rung, RailBottomY / RungHeight - 1);
-    const qreal py = rung * RungHeight + RungHeight / 2.0 - portOff;
-
+    // ── 触点 / 线圈（网格放置）───────────────────────────────
     BaseItem* newItem = nullptr;
-
     switch (m_mode) {
     case Mode_AddContact_NO:
         newItem = new ContactItem(ContactItem::NormalOpen);
@@ -253,22 +264,17 @@ void LadderScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
         static_cast<CoilItem*>(newItem)->setTagName(
             QString("Y%1").arg(m_coilCount++));
         break;
-    case Mode_AddFuncBlock: {
-        // FB 不参与梯级吸附，用普通网格
-        auto* fb = new FunctionBlockItem(
-            "TON", QString("TON_%1").arg(m_fbCount++));
-        fb->setPos(snapX(raw.x()),
-                   qRound(raw.y() / GridSize) * (qreal)GridSize);
-        addItem(fb);
-        return;
-    }
     default:
         break;
     }
 
     if (newItem) {
-        newItem->setPos(px, py);
-        addItem(newItem);
+        newItem->setPos(snapPt);
+        int itemLid = m_nextLocalId++;
+        newItem->setData(0, itemLid);
+        m_items[itemLid] = newItem;
+        m_undoStack->push(new AddItemCmd(this, newItem,
+            QString("Add %1").arg(newItem->metaObject()->className())));
     }
 }
 
@@ -304,7 +310,35 @@ void LadderScene::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 }
 
 // ══════════════════════════════════════════════════════════════
-// keyPressEvent —— Delete 删除选中；Escape 返回 Select
+// mouseReleaseEvent —— 检测拖拽移动，生成 MoveItemsCmd
+// ══════════════════════════════════════════════════════════════
+void LadderScene::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
+{
+    QGraphicsScene::mouseReleaseEvent(event);
+
+    if (event->button() == Qt::LeftButton && m_mode == Mode_Select
+        && !m_dragStartPos.isEmpty())
+    {
+        QList<MoveEntry> moves;
+        for (auto it = m_dragStartPos.cbegin(); it != m_dragStartPos.cend(); ++it) {
+            QGraphicsItem* gi = it.key();
+            if (!items().contains(gi)) continue;
+            const QPointF newPos = gi->pos();
+            if (qAbs(newPos.x() - it.value().x()) > 0.5 ||
+                qAbs(newPos.y() - it.value().y()) > 0.5)
+            {
+                moves << MoveEntry{gi, it.value(), newPos};
+            }
+        }
+        if (!moves.isEmpty())
+            m_undoStack->push(new MoveItemsCmd(moves,
+                moves.size() == 1 ? "Move Item" : "Move Items"));
+        m_dragStartPos.clear();
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// keyPressEvent —— Delete 删除选中（含 undo）；Escape 返回 Select
 // ══════════════════════════════════════════════════════════════
 void LadderScene::keyPressEvent(QKeyEvent *event)
 {
@@ -312,10 +346,9 @@ void LadderScene::keyPressEvent(QKeyEvent *event)
         event->key() == Qt::Key_Backspace)
     {
         const auto sel = selectedItems();
-        for (QGraphicsItem* item : sel) {
-            removeItem(item);
-            delete item;
-        }
+        if (!sel.isEmpty())
+            m_undoStack->push(new DeleteItemsCmd(this, sel,
+                sel.size() == 1 ? "Delete Item" : "Delete Items"));
         if (m_tempWire && !items().contains(m_tempWire))
             m_tempWire = nullptr;
         event->accept();
@@ -336,11 +369,13 @@ void LadderScene::keyPressEvent(QKeyEvent *event)
 }
 
 // ══════════════════════════════════════════════════════════════
-// contextMenuEvent —— 右键菜单
+// contextMenuEvent —— 右键菜单（含 undo）
 // ══════════════════════════════════════════════════════════════
 void LadderScene::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
 {
     const QPointF scenePos = event->scenePos();
+    auto snapG = [&](qreal v) { return qRound(v / GridSize) * (qreal)GridSize; };
+    const QPointF snapPt(snapG(scenePos.x()), snapG(scenePos.y()));
 
     // 找点击位置的 BaseItem
     BaseItem* hitItem = nullptr;
@@ -360,20 +395,11 @@ void LadderScene::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
         QAction* chosen = menu.exec(event->screenPos());
         if (chosen == editAct)
             hitItem->editProperties();
-        else if (chosen == delAct) {
-            removeItem(hitItem);
-            delete hitItem;
-        }
+        else if (chosen == delAct)
+            m_undoStack->push(new DeleteItemsCmd(this, {hitItem}, "Delete Item"));
 
     } else {
         // ── 空白区域右键：快速添加元件 ──────────────────────
-        qreal px = qRound(scenePos.x() / GridSize) * (qreal)GridSize;
-        // 端口对齐梯级中心
-        constexpr int portOff = 20;
-        int rung = qRound((scenePos.y() + portOff - RungHeight / 2.0) / RungHeight);
-        rung = qBound(0, rung, RailBottomY / RungHeight - 1);
-        QPointF placePos(px, rung * RungHeight + RungHeight / 2.0 - portOff);
-
         auto* addNO  = menu.addAction(QIcon(":/images/add_contact.png"), "Add Contact (NO)");
         auto* addNC  = menu.addAction(QIcon(":/images/add_contact.png"), "Add Contact (NC)");
         menu.addSeparator();
@@ -416,16 +442,23 @@ void LadderScene::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
             if (ok) {
                 auto* fb = new FunctionBlockItem(
                     fbType, QString("%1_%2").arg(fbType).arg(m_fbCount++));
-                fb->setPos(px, qRound(scenePos.y() / GridSize) * (qreal)GridSize);
-                addItem(fb);
+                fb->setPos(snapPt);
+                int fbLid = m_nextLocalId++;
+                fb->setData(0, fbLid);
+                m_items[fbLid] = fb;
+                m_undoStack->push(new AddItemCmd(this, fb, "Add Function Block"));
             }
             event->accept();
             return;
         }
 
         if (newItem) {
-            newItem->setPos(placePos);
-            addItem(newItem);
+            newItem->setPos(snapPt);
+            int itemLid = m_nextLocalId++;
+            newItem->setData(0, itemLid);
+            m_items[itemLid] = newItem;
+            m_undoStack->push(new AddItemCmd(this, newItem,
+                QString("Add %1").arg(newItem->metaObject()->className())));
         }
     }
 

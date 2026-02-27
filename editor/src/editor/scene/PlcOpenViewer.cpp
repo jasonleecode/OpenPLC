@@ -1,5 +1,5 @@
-// PlcOpenViewer.cpp — 统一图形编辑/查看场景
-// 支持 PLCopen XML 导入 (LD/FBD/SFC) 以及空白可编辑画布
+// PlcOpenViewer.cpp — PLCopen XML 图形编辑/查看场景
+// 继承 LadderScene，增加 PLCopen XML 导入/导出及 FBD/SFC 渲染
 
 #include "PlcOpenViewer.h"
 
@@ -16,12 +16,7 @@
 #include <QGraphicsTextItem>
 #include <QGraphicsEllipseItem>
 #include <QGraphicsPolygonItem>
-#include <QGraphicsSceneMouseEvent>
-#include <QGraphicsSceneContextMenuEvent>
 #include <QApplication>
-#include <QKeyEvent>
-#include <QMenu>
-#include <QInputDialog>
 #include <QDomDocument>
 #include <QFont>
 #include <QPainterPath>
@@ -30,8 +25,6 @@
 #include <QColor>
 #include <QTimer>
 #include <algorithm>
-
-#include "../../utils/UndoStack.h"
 
 // ─────────────────────────────────────────────────────────────
 // PLCopen 坐标 → 场景坐标放大系数
@@ -48,7 +41,7 @@ static const QColor kColBlock    { "#1A2E4A" };
 static const QColor kColWire     { "#1A2E4A" };
 
 PlcOpenViewer::PlcOpenViewer(QObject* parent)
-    : QGraphicsScene(parent)
+    : LadderScene(parent)   // 继承自 LadderScene（包含编辑状态、undo stack）
 {
     setSceneRect(-80, -80, 2200, 2000);
 
@@ -58,7 +51,27 @@ PlcOpenViewer::PlcOpenViewer(QObject* parent)
     connect(m_wireTimer, &QTimer::timeout,
             this, &PlcOpenViewer::updateAllWires);
 
-    m_undoStack = new QUndoStack(this);
+    // m_undoStack 已由 LadderScene 构造函数创建
+}
+
+// ─────────────────────────────────────────────────────────────
+// 背景绘制：简单点阵（无 LD 电源母线），覆盖 LadderScene 默认
+// ─────────────────────────────────────────────────────────────
+void PlcOpenViewer::drawBackground(QPainter* painter, const QRectF& rect)
+{
+    const QColor bg      = QApplication::palette().base().color();
+    const QColor dotColor = bg.lightnessF() > 0.5
+                            ? QColor("#CCCCCC")
+                            : QColor("#3A3A3A");
+    painter->fillRect(rect, bg);
+
+    painter->setPen(QPen(dotColor, 1.0));
+    const int dot = GridSize;
+    int fx = (int)rect.left()  - ((int)rect.left()  % dot);
+    int fy = (int)rect.top()   - ((int)rect.top()   % dot);
+    for (int x = fx; x <= (int)rect.right();  x += dot)
+        for (int y = fy; y <= (int)rect.bottom(); y += dot)
+            painter->drawPoint(x, y);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -94,7 +107,7 @@ void PlcOpenViewer::loadFromXmlString(const QString& xmlBody)
     else
         buildFbd(body);
 
-    // 根据实际内容更新 sceneRect，确保滚动条能覆盖所有元素
+    // 根据实际内容更新 sceneRect
     QRectF bounds = itemsBoundingRect();
     if (!bounds.isEmpty())
         setSceneRect(bounds.adjusted(-80, -80, 80, 80));
@@ -137,7 +150,6 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
         const QString tag = e.tagName();
         int    lid = e.attribute("localId", "-1").toInt();
         QPointF p  = absPos(e);
-        // XML 元素尺寸（已 × kScale）
         qreal xw = e.attribute("width",  "80").toDouble() * kScale;
         qreal xh = e.attribute("height", "30").toDouble() * kScale;
 
@@ -146,7 +158,6 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
             const QString typeName     = e.attribute("typeName");
             const QString instanceName = e.attribute("instanceName");
 
-            // 解析端口名称及 relPosition
             QStringList      inNames, outNames;
             QVector<QPointF> inRelPts, outRelPts;
 
@@ -180,7 +191,6 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
             addItem(fb);
             m_items[lid] = fb;
 
-            // 输出端口绝对坐标（从 XML relPos 计算，确保与导线端点一致）
             for (int k = 0; k < outNames.size(); ++k) {
                 QPointF portScene = p + outRelPts[k];
                 m_namedOutPort[lid][outNames[k]] = portScene;
@@ -202,7 +212,6 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
             addItem(ct);
             m_items[lid] = ct;
 
-            // 输出端口：从 XML cpOut relPos
             QDomElement cpOut = e.firstChildElement("connectionPointOut");
             m_outPort[lid] = cpRelScene(cpOut, p);
         }
@@ -252,7 +261,7 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
         // ── coil（线圈）───────────────────────────────────────
         else if (tag == "coil") {
             const QString varName = e.firstChildElement("variable").text();
-            const QString storage = e.attribute("storage"); // "set" / "reset" / ""
+            const QString storage = e.attribute("storage");
             CoilItem::CoilType ctype = CoilItem::Output;
             if (storage == "set")   ctype = CoilItem::SetCoil;
             if (storage == "reset") ctype = CoilItem::ResetCoil;
@@ -284,7 +293,6 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
 
         // ── leftPowerRail（左母线）────────────────────────────
         else if (tag == "leftPowerRail") {
-            // 使用 setPos 而非绝对坐标，以便 pos() 能反映位置（用于序列化）
             auto* r = new QGraphicsRectItem(0, 0, xw, xh);
             r->setPen(QPen(QColor("#1565C0"), 2));
             r->setBrush(QBrush(QColor("#1565C0")));
@@ -296,7 +304,6 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
             addItem(r);
             m_items[lid] = r;
 
-            // 输出端口：从 XML cpOut relPos
             QDomElement cpOut = e.firstChildElement("connectionPointOut");
             m_outPort[lid] = cpRelScene(cpOut, p);
         }
@@ -315,8 +322,6 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
             addItem(r);
 
             auto* t = new QGraphicsTextItem();
-            // 字体大小与方框高度成比例（约5%），最小 18 场景像素
-            // 保证在 fitInView 常规缩放下（~0.35x）仍可读
             QFont f("Arial");
             f.setPixelSize(qMax(18, (int)(xh * 0.05)));
             t->setFont(f);
@@ -331,7 +336,6 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
 
 void PlcOpenViewer::drawFbdWires(const QDomElement& body)
 {
-    // H-V-H fallback 路由（XML 无位置信息时使用）
     auto routeHvh = [](QPointF s, QPointF d) -> QPainterPath {
         QPainterPath path;
         path.moveTo(s);
@@ -379,14 +383,12 @@ void PlcOpenViewer::drawFbdWires(const QDomElement& body)
                     }
                     wire->setPath(path);
                 } else {
-                    // fallback：无位置信息时用端口坐标 H-V-H 路由
                     QPointF src = getOutputPortScene(refId, fp);
                     QPointF dst = getInputPortScene(lid, dstFp);
                     if (src.x() > -1e8 && dst.x() > -1e8)
                         wire->setPath(routeHvh(src, dst));
                 }
 
-                // 记录连接，供 item 被拖动后 updateAllWires() 动态重路由
                 m_connections << FbdConn{refId, fp, lid, dstFp, wire};
             }
         };
@@ -404,12 +406,10 @@ void PlcOpenViewer::drawFbdWires(const QDomElement& body)
             processConn(e.firstChildElement("connectionPointIn"), "");
         }
     }
-    // 不在此处调用 updateAllWires()：
-    // 初始显示使用 XML 路径，拖动后由 timer 触发 updateAllWires() 切换动态路由
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SFC 渲染（保持原来的简单矩形/线条方式）
+// SFC 渲染
 // ═══════════════════════════════════════════════════════════════
 void PlcOpenViewer::buildSfc(const QDomElement& body)
 {
@@ -423,7 +423,6 @@ QGraphicsTextItem* PlcOpenViewer::addLabel(const QString& text,
                                             int /*fontSize*/)
 {
     auto* item = new QGraphicsTextItem(text);
-    // 字体与所在矩形高度成比例（约 18%），最小 10 场景像素
     QFont f("Arial");
     f.setPixelSize(qMax(10, (int)(rect.height() * 0.18)));
     item->setFont(f);
@@ -473,7 +472,6 @@ void PlcOpenViewer::createSfcItems(const QDomElement& body)
                                                cx + 15*kScale, p.y());
             line->setPen(transPen); addItem(line);
 
-            // 转换条件：优先 <inline>，其次 <reference name="...">
             QDomElement condElem = e.firstChildElement("condition");
             QString condText;
             QDomElement inlineEl = condElem.firstChildElement("inline");
@@ -492,11 +490,12 @@ void PlcOpenViewer::createSfcItems(const QDomElement& body)
             if (!condText.isEmpty()) {
                 auto* t = new QGraphicsTextItem(condText);
                 QFont f("Arial");
-                f.setPixelSize(18);   // transition 旁的条件文本，固定 18 场景像素
+                f.setPixelSize(18);
                 t->setFont(f);
                 t->setPos(cx + 18*kScale/2, p.y() - 12);
                 addItem(t);
             }
+
             m_outPort[lid] = QPointF(p.x() + w/2, p.y() + 2);
         }
         else if (tag == "selectionDivergence") {
@@ -536,13 +535,11 @@ void PlcOpenViewer::createSfcItems(const QDomElement& body)
             addItem(poly);
             auto* t = new QGraphicsTextItem(target);
             QFont f("Arial");
-            f.setPixelSize(18);   // jumpStep 跳转目标名，固定 18 场景像素
+            f.setPixelSize(18);
             t->setFont(f);
             t->setPos(p.x()+w/2+10, p.y()); addItem(t);
         }
         else if (tag == "actionBlock") {
-            // 解析每个 action：qualifier | name/code | duration
-            // action 的 body 可以是 <reference name="..."> 或 <inline><ST>...</ST></inline>
             QStringList lines;
             QDomNodeList actions = e.elementsByTagName("action");
             for (int k = 0; k < actions.count(); ++k) {
@@ -550,7 +547,6 @@ void PlcOpenViewer::createSfcItems(const QDomElement& body)
                 QString qualifier = ac.attribute("qualifier");
                 QString duration  = ac.attribute("duration");
 
-                // 动作名称：优先 <reference name>, 其次 <inline> ST 代码
                 QString actionName;
                 QDomElement refEl = ac.firstChildElement("reference");
                 if (!refEl.isNull()) {
@@ -564,7 +560,6 @@ void PlcOpenViewer::createSfcItems(const QDomElement& body)
                     }
                 }
 
-                // 格式：Q | name | duration（duration 可选）
                 QString line = qualifier.leftJustified(2);
                 line += " | " + actionName;
                 if (!duration.isEmpty()) line += "  [" + duration + "]";
@@ -578,7 +573,6 @@ void PlcOpenViewer::createSfcItems(const QDomElement& body)
             addItem(r);
             auto* t = new QGraphicsTextItem();
             QFont f("Courier New");
-            // actionBlock 字体与方框高度成比例（约5%），最小 14 场景像素
             f.setPixelSize(qMax(14, (int)(rect.height() * 0.05)));
             t->setFont(f);
             t->setTextWidth(rect.width() - 4);
@@ -596,7 +590,6 @@ void PlcOpenViewer::drawSfcWires(const QDomElement& body)
     for (QDomElement e = body.firstChildElement();
          !e.isNull(); e = e.nextSiblingElement())
     {
-        // 遍历所有 connectionPointIn（selectionConvergence 有多个）
         for (QDomElement cpIn = e.firstChildElement("connectionPointIn");
              !cpIn.isNull(); cpIn = cpIn.nextSiblingElement("connectionPointIn"))
         {
@@ -613,7 +606,6 @@ void PlcOpenViewer::drawSfcWires(const QDomElement& body)
                 auto* pi = new QGraphicsPathItem();
                 QPainterPath path;
 
-                // 优先使用 XML 存储的折点（顺序 dst→src，绘制时反转）
                 QDomNodeList posList = conn.elementsByTagName("position");
                 if (posList.count() >= 2) {
                     for (int j = posList.count() - 1; j >= 0; --j) {
@@ -626,7 +618,6 @@ void PlcOpenViewer::drawSfcWires(const QDomElement& body)
                             path.lineTo(pt);
                     }
                 } else {
-                    // fallback：直线（无 XML 位置数据时）
                     QPointF src = m_outPort.value(refId, QPointF(-1e9,-1e9));
                     if (src.x() < -1e8) continue;
                     path.moveTo(src);
@@ -642,14 +633,9 @@ void PlcOpenViewer::drawSfcWires(const QDomElement& body)
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 编辑功能：背景 / 前景 / 事件处理
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
 // 动态导线路由 & 序列化
 // ═══════════════════════════════════════════════════════════════
 
-// ── 获取 item 的输出端口场景坐标 ──────────────────────────────
 QPointF PlcOpenViewer::getOutputPortScene(int lid, const QString& param) const
 {
     QGraphicsItem* gi = m_items.value(lid);
@@ -663,12 +649,10 @@ QPointF PlcOpenViewer::getOutputPortScene(int lid, const QString& param) const
     if (auto* vb = qgraphicsitem_cast<VarBoxItem*>(gi))   return vb->rightPort();
     if (auto* ct = qgraphicsitem_cast<ContactItem*>(gi))  return ct->rightPort();
 
-    // leftPowerRail（raw QGraphicsRectItem）：使用 sceneBoundingRect 右侧中心
     QRectF r = gi->sceneBoundingRect();
     return { r.right(), r.center().y() };
 }
 
-// ── 获取 item 的输入端口场景坐标 ──────────────────────────────
 QPointF PlcOpenViewer::getInputPortScene(int lid, const QString& param) const
 {
     QGraphicsItem* gi = m_items.value(lid);
@@ -685,7 +669,6 @@ QPointF PlcOpenViewer::getInputPortScene(int lid, const QString& param) const
     return {-1e9, -1e9};
 }
 
-// ── 重算所有导线路径（H-V-H 正交路由）────────────────────────
 void PlcOpenViewer::updateAllWires()
 {
     if (m_updatingWires) return;
@@ -711,7 +694,6 @@ void PlcOpenViewer::updateAllWires()
     m_updatingWires = false;
 }
 
-// ── 在 DOM 中按 localId 查找顶层元素 ─────────────────────────
 QDomElement PlcOpenViewer::findElemById(const QDomElement& root, int lid)
 {
     for (QDomElement e = root.firstChildElement();
@@ -721,7 +703,6 @@ QDomElement PlcOpenViewer::findElemById(const QDomElement& root, int lid)
     return {};
 }
 
-// ── 把当前 item 坐标写回 m_bodyDoc 的 <position> ─────────────
 void PlcOpenViewer::syncPositionsToDoc()
 {
     if (m_bodyDoc.isNull()) return;
@@ -731,7 +712,6 @@ void PlcOpenViewer::syncPositionsToDoc()
         QDomElement elem = findElemById(root, it.key());
         if (elem.isNull()) continue;
 
-        // pos() 给出 item 在场景中的位置（setPos 设置的值）
         QPointF p = it.value()->pos() / kScale;
         QDomElement posEl = elem.firstChildElement("position");
         if (!posEl.isNull()) {
@@ -741,7 +721,6 @@ void PlcOpenViewer::syncPositionsToDoc()
     }
 }
 
-// ── 把当前导线折点写回 m_bodyDoc 的 <connection>/<position> ──
 void PlcOpenViewer::syncWirePathsToDoc()
 {
     if (m_bodyDoc.isNull()) return;
@@ -752,11 +731,9 @@ void PlcOpenViewer::syncWirePathsToDoc()
         QPainterPath path = c.wire->path();
         if (path.elementCount() < 2) continue;
 
-        // 找到目标元素
         QDomElement dstElem = findElemById(root, c.dstId);
         if (dstElem.isNull()) continue;
 
-        // 找到对应的 <connection> 子元素
         QDomElement connElem;
         if (dstElem.tagName() == "block") {
             QDomElement inVars = dstElem.firstChildElement("inputVariables");
@@ -785,7 +762,6 @@ void PlcOpenViewer::syncWirePathsToDoc()
         }
         if (connElem.isNull()) continue;
 
-        // 删除旧 <position> 子元素
         QList<QDomNode> toRemove;
         QDomNodeList posElems = connElem.childNodes();
         for (int k = 0; k < posElems.count(); ++k) {
@@ -796,7 +772,6 @@ void PlcOpenViewer::syncWirePathsToDoc()
         for (QDomNode n : toRemove)
             connElem.removeChild(n);
 
-        // 写入新 <position>（PLCopen 顺序：dst→src，即路径倒序）
         int n = path.elementCount();
         for (int i = n - 1; i >= 0; --i) {
             QPainterPath::Element el = path.elementAt(i);
@@ -808,29 +783,25 @@ void PlcOpenViewer::syncWirePathsToDoc()
     }
 }
 
-// ── 序列化场景 → "FBD\n<FBD>...</FBD>" ──────────────────────
 QString PlcOpenViewer::toXmlString()
 {
     if (m_bodyLanguage.isEmpty()) return {};
 
     if (m_isNewScene) {
-        buildBodyFromScene();   // 从场景 item 重建 body DOM
+        buildBodyFromScene();
     } else {
-        // PLCopen 导入的场景：只更新已有 DOM 节点的位置
         syncPositionsToDoc();
         syncWirePathsToDoc();
     }
     return m_bodyLanguage + "\n" + m_bodyDoc.toString(2);
 }
 
-// ── 从场景中所有 item 重新构建 m_bodyDoc（新建画布专用）───────
 void PlcOpenViewer::buildBodyFromScene()
 {
     m_bodyDoc = QDomDocument();
     QDomElement root = m_bodyDoc.createElement(m_bodyLanguage);
     m_bodyDoc.appendChild(root);
 
-    // 辅助：追加 PLCopen <position> 子元素（场景坐标 ÷ kScale）
     auto addPos = [&](QDomElement& parent, QPointF scenePos) {
         QDomElement pos = m_bodyDoc.createElement("position");
         pos.setAttribute("x", QString::number(scenePos.x() / kScale, 'f', 0));
@@ -900,7 +871,7 @@ void PlcOpenViewer::buildBodyFromScene()
             root.appendChild(e);
 
         } else {
-            // 原始 QGraphicsItem（leftPowerRail）
+            // leftPowerRail（raw QGraphicsRectItem）
             QDomElement e = m_bodyDoc.createElement("leftPowerRail");
             e.setAttribute("localId", lid);
             QRectF br = gi->boundingRect();
@@ -922,7 +893,6 @@ void PlcOpenViewer::buildBodyFromScene()
         QPointF startPt = wire->startPos();
         QPointF endPt   = wire->endPos();
 
-        // 找输出端口（wire 起点）最近的 item
         int srcId = -1;
         for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
             QPointF rp = getOutputPortScene(it.key(), {});
@@ -930,7 +900,6 @@ void PlcOpenViewer::buildBodyFromScene()
             if ((rp - startPt).manhattanLength() < tol) { srcId = it.key(); break; }
         }
 
-        // 找输入端口（wire 终点）最近的 item
         int dstId = -1;
         for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
             QPointF lp = getInputPortScene(it.key(), {});
@@ -979,346 +948,4 @@ void PlcOpenViewer::initEmpty(const QString& lang)
     rail->setData(0, lid);
     m_items[lid] = rail;
     addItem(rail);
-}
-
-// ── 点阵背景（无横线，Beremiz 风格）──────────────────────────
-void PlcOpenViewer::drawBackground(QPainter* painter, const QRectF& rect)
-{
-    const QColor bg      = QApplication::palette().base().color();
-    const QColor dotColor = bg.lightnessF() > 0.5
-                            ? QColor("#CCCCCC")   // 浅色主题
-                            : QColor("#3A3A3A");  // 深色主题
-    painter->fillRect(rect, bg);
-
-    painter->setPen(QPen(dotColor, 1.0));
-    const int dot = GridSize;
-    int fx = (int)rect.left()  - ((int)rect.left()  % dot);
-    int fy = (int)rect.top()   - ((int)rect.top()   % dot);
-    for (int x = fx; x <= (int)rect.right();  x += dot)
-        for (int y = fy; y <= (int)rect.bottom(); y += dot)
-            painter->drawPoint(x, y);
-}
-
-// ── 端口吸附指示器（绿色圆圈）────────────────────────────────
-void PlcOpenViewer::drawForeground(QPainter* painter, const QRectF&)
-{
-    if (!m_showPortSnap) return;
-    painter->save();
-    painter->setRenderHint(QPainter::Antialiasing);
-    painter->setPen(QPen(QColor("#00AA44"), 1.5));
-    painter->setBrush(QColor(0, 170, 68, 60));
-    painter->drawEllipse(m_portSnapPos, 9.0, 9.0);
-    painter->restore();
-}
-
-// ── 设置编辑模式 ──────────────────────────────────────────────
-void PlcOpenViewer::setMode(EditorMode mode)
-{
-    if (m_tempWire && mode != Mode_AddWire) {
-        removeItem(m_tempWire);
-        delete m_tempWire;
-        m_tempWire = nullptr;
-    }
-    m_showPortSnap = false;
-    m_mode = mode;
-    emit modeChanged(mode);
-}
-
-// ── 查找最近端口（用于导线吸附）──────────────────────────────
-QPointF PlcOpenViewer::snapToNearestPort(const QPointF& pos, qreal radius) const
-{
-    QPointF best = pos;
-    qreal   bestSq = radius * radius;
-
-    auto check = [&](QPointF p) {
-        qreal dx = p.x() - pos.x(), dy = p.y() - pos.y();
-        qreal d = dx*dx + dy*dy;
-        if (d < bestSq) { bestSq = d; best = p; }
-    };
-
-    for (QGraphicsItem* gi : items()) {
-        if (auto* bi = dynamic_cast<BaseItem*>(gi)) {
-            check(bi->leftPort());
-            check(bi->rightPort());
-        }
-        if (auto* fb = dynamic_cast<FunctionBlockItem*>(gi)) {
-            for (int i = 0; i < fb->inputCount();  ++i) check(fb->inputPortPos(i));
-            for (int i = 0; i < fb->outputCount(); ++i) check(fb->outputPortPos(i));
-        }
-    }
-    return best;
-}
-
-// ── 鼠标按下：放置元件 / 画导线 ──────────────────────────────
-void PlcOpenViewer::mousePressEvent(QGraphicsSceneMouseEvent* event)
-{
-    if (event->button() != Qt::LeftButton || m_mode == Mode_Select) {
-        QGraphicsScene::mousePressEvent(event);
-        // 选择模式下：记录当前选中 items 的位置，供拖拽结束时对比
-        if (m_mode == Mode_Select && event->button() == Qt::LeftButton) {
-            m_dragStartPos.clear();
-            for (QGraphicsItem* gi : selectedItems())
-                m_dragStartPos[gi] = gi->pos();
-        }
-        return;
-    }
-
-    const QPointF raw = event->scenePos();
-    auto snapG = [&](qreal v) { return qRound(v / GridSize) * (qreal)GridSize; };
-    const QPointF snapPt(snapG(raw.x()), snapG(raw.y()));
-
-    // ── 导线模式 ──────────────────────────────────────────────
-    if (m_mode == Mode_AddWire) {
-        QPointF snap = snapToNearestPort(raw, 20.0);
-        if (snap == raw) snap = snapPt;
-
-        if (!m_tempWire) {
-            // 第一次点击：仅创建预览导线，不计入 undo
-            m_tempWire = new WireItem(snap, snap);
-            addItem(m_tempWire);
-        } else {
-            // 第二次点击：确认导线，推入 undo 命令
-            // (wire 已在 scene 中，AddItemCmd::redo() 会幂等地 addItem)
-            m_tempWire->setEndPos(snap);
-            m_undoStack->push(new AddItemCmd(this, m_tempWire, "Add Wire"));
-            m_tempWire     = nullptr;
-            m_showPortSnap = false;
-            update();
-        }
-        return;
-    }
-
-    // ── 功能块（自由放置）────────────────────────────────────
-    if (m_mode == Mode_AddFuncBlock) {
-        auto* fb = new FunctionBlockItem(
-            "TON", QString("TON_%1").arg(m_fbCount++));
-        fb->setPos(snapPt);
-        int fbLid = m_nextLocalId++;
-        fb->setData(0, fbLid);
-        m_items[fbLid] = fb;
-        m_undoStack->push(new AddItemCmd(this, fb, "Add Function Block"));
-        return;
-    }
-
-    // ── 触点 / 线圈（吸附网格，自由 Y）──────────────────────
-    BaseItem* newItem = nullptr;
-    switch (m_mode) {
-    case Mode_AddContact_NO:
-        newItem = new ContactItem(ContactItem::NormalOpen);
-        static_cast<ContactItem*>(newItem)->setTagName(
-            QString("X%1").arg(m_contactCount++));
-        break;
-    case Mode_AddContact_NC:
-        newItem = new ContactItem(ContactItem::NormalClosed);
-        static_cast<ContactItem*>(newItem)->setTagName(
-            QString("X%1").arg(m_contactCount++));
-        break;
-    case Mode_AddContact_P:
-        newItem = new ContactItem(ContactItem::PositiveTransition);
-        static_cast<ContactItem*>(newItem)->setTagName(
-            QString("X%1").arg(m_contactCount++));
-        break;
-    case Mode_AddContact_N:
-        newItem = new ContactItem(ContactItem::NegativeTransition);
-        static_cast<ContactItem*>(newItem)->setTagName(
-            QString("X%1").arg(m_contactCount++));
-        break;
-    case Mode_AddCoil:
-        newItem = new CoilItem(CoilItem::Output);
-        static_cast<CoilItem*>(newItem)->setTagName(
-            QString("Y%1").arg(m_coilCount++));
-        break;
-    case Mode_AddCoil_S:
-        newItem = new CoilItem(CoilItem::SetCoil);
-        static_cast<CoilItem*>(newItem)->setTagName(
-            QString("Y%1").arg(m_coilCount++));
-        break;
-    case Mode_AddCoil_R:
-        newItem = new CoilItem(CoilItem::ResetCoil);
-        static_cast<CoilItem*>(newItem)->setTagName(
-            QString("Y%1").arg(m_coilCount++));
-        break;
-    default:
-        break;
-    }
-
-    if (newItem) {
-        newItem->setPos(snapPt);
-        int itemLid = m_nextLocalId++;
-        newItem->setData(0, itemLid);
-        m_items[itemLid] = newItem;
-        m_undoStack->push(new AddItemCmd(this, newItem,
-            QString("Add %1").arg(newItem->metaObject()->className())));
-    }
-}
-
-// ── 鼠标移动：更新导线预览 + 端口吸附指示器 ─────────────────
-void PlcOpenViewer::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
-{
-    QGraphicsScene::mouseMoveEvent(event);
-
-    if (m_mode == Mode_AddWire) {
-        const QPointF raw  = event->scenePos();
-        const QPointF snap = snapToNearestPort(raw, 20.0);
-
-        bool hadSnap   = m_showPortSnap;
-        m_showPortSnap = (snap != raw);
-        m_portSnapPos  = snap;
-
-        if (m_tempWire) {
-            QPointF end = m_showPortSnap ? snap
-                : QPointF(qRound(raw.x() / GridSize) * (qreal)GridSize,
-                          qRound(raw.y() / GridSize) * (qreal)GridSize);
-            m_tempWire->setEndPos(end);
-        }
-
-        if (hadSnap != m_showPortSnap || m_tempWire)
-            update();
-
-    } else if (m_showPortSnap) {
-        m_showPortSnap = false;
-        update();
-    }
-}
-
-// ── 鼠标释放：检测拖拽移动，生成 MoveItemsCmd ────────────────
-void PlcOpenViewer::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
-{
-    QGraphicsScene::mouseReleaseEvent(event);
-
-    if (event->button() == Qt::LeftButton && m_mode == Mode_Select
-        && !m_dragStartPos.isEmpty())
-    {
-        QList<MoveEntry> moves;
-        for (auto it = m_dragStartPos.cbegin(); it != m_dragStartPos.cend(); ++it) {
-            QGraphicsItem* gi = it.key();
-            if (!items().contains(gi)) continue;   // item was deleted mid-drag (edge case)
-            const QPointF newPos = gi->pos();
-            if (qAbs(newPos.x() - it.value().x()) > 0.5 ||
-                qAbs(newPos.y() - it.value().y()) > 0.5)
-            {
-                moves << MoveEntry{gi, it.value(), newPos};
-            }
-        }
-        if (!moves.isEmpty())
-            m_undoStack->push(new MoveItemsCmd(moves,
-                moves.size() == 1 ? "Move Item" : "Move Items"));
-        m_dragStartPos.clear();
-    }
-}
-
-// ── 键盘：Delete 删除选中；Escape 返回 Select ─────────────────
-void PlcOpenViewer::keyPressEvent(QKeyEvent* event)
-{
-    if (event->key() == Qt::Key_Delete ||
-        event->key() == Qt::Key_Backspace)
-    {
-        const auto sel = selectedItems();
-        if (!sel.isEmpty())
-            m_undoStack->push(new DeleteItemsCmd(this, sel,
-                sel.size() == 1 ? "Delete Item" : "Delete Items"));
-        if (m_tempWire && !items().contains(m_tempWire))
-            m_tempWire = nullptr;
-        event->accept();
-    }
-    else if (event->key() == Qt::Key_Escape) {
-        if (m_tempWire) {
-            removeItem(m_tempWire);
-            delete m_tempWire;
-            m_tempWire = nullptr;
-        }
-        m_showPortSnap = false;
-        setMode(Mode_Select);
-        event->accept();
-    }
-    else {
-        QGraphicsScene::keyPressEvent(event);
-    }
-}
-
-// ── 右键菜单 ──────────────────────────────────────────────────
-void PlcOpenViewer::contextMenuEvent(QGraphicsSceneContextMenuEvent* event)
-{
-    const QPointF scenePos = event->scenePos();
-    auto snapG = [&](qreal v) { return qRound(v / GridSize) * (qreal)GridSize; };
-    const QPointF snapPt(snapG(scenePos.x()), snapG(scenePos.y()));
-
-    // 找点击位置的 BaseItem
-    BaseItem* hitItem = nullptr;
-    for (QGraphicsItem* gi : items(scenePos)) {
-        hitItem = dynamic_cast<BaseItem*>(gi);
-        if (hitItem) break;
-    }
-
-    QMenu menu;
-
-    if (hitItem) {
-        auto* editAct = menu.addAction("Edit Name...");
-        menu.addSeparator();
-        auto* delAct  = menu.addAction("Delete");
-
-        QAction* chosen = menu.exec(event->screenPos());
-        if (chosen == editAct)
-            hitItem->editProperties();
-        else if (chosen == delAct) {
-            m_undoStack->push(new DeleteItemsCmd(this, {hitItem}, "Delete Item"));
-        }
-    } else {
-        // 空白区域：快速添加元件
-        auto* addNO  = menu.addAction("Add Contact (NO)");
-        auto* addNC  = menu.addAction("Add Contact (NC)");
-        menu.addSeparator();
-        auto* addOut = menu.addAction("Add Coil (Output)");
-        auto* addSet = menu.addAction("Add Set Coil (S)");
-        auto* addRst = menu.addAction("Add Reset Coil (R)");
-        menu.addSeparator();
-        auto* addFb  = menu.addAction("Add Function Block...");
-
-        QAction* chosen = menu.exec(event->screenPos());
-
-        BaseItem* newItem = nullptr;
-        if (chosen == addNO) {
-            auto* c = new ContactItem(ContactItem::NormalOpen);
-            c->setTagName(QString("X%1").arg(m_contactCount++));
-            newItem = c;
-        } else if (chosen == addNC) {
-            auto* c = new ContactItem(ContactItem::NormalClosed);
-            c->setTagName(QString("X%1").arg(m_contactCount++));
-            newItem = c;
-        } else if (chosen == addOut) {
-            auto* c = new CoilItem(CoilItem::Output);
-            c->setTagName(QString("Y%1").arg(m_coilCount++));
-            newItem = c;
-        } else if (chosen == addSet) {
-            auto* c = new CoilItem(CoilItem::SetCoil);
-            c->setTagName(QString("Y%1").arg(m_coilCount++));
-            newItem = c;
-        } else if (chosen == addRst) {
-            auto* c = new CoilItem(CoilItem::ResetCoil);
-            c->setTagName(QString("Y%1").arg(m_coilCount++));
-            newItem = c;
-        } else if (chosen == addFb) {
-            bool ok;
-            const QString fbType = QInputDialog::getItem(
-                nullptr, "Add Function Block", "Block type:",
-                {"TON","TOF","CTU","CTD","CTUD","ADD","SUB","MUL","DIV","SEL","MUX","SR","RS"},
-                0, false, &ok);
-            if (ok) {
-                auto* fb = new FunctionBlockItem(
-                    fbType, QString("%1_%2").arg(fbType).arg(m_fbCount++));
-                fb->setPos(snapPt);
-                m_undoStack->push(new AddItemCmd(this, fb, "Add Function Block"));
-            }
-            event->accept();
-            return;
-        }
-
-        if (newItem) {
-            newItem->setPos(snapPt);
-            m_undoStack->push(new AddItemCmd(this, newItem,
-                QString("Add %1").arg(newItem->metaObject()->className())));
-        }
-    }
-
-    event->accept();
 }

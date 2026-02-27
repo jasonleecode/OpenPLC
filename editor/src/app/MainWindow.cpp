@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ProjectManager.h"
 
 #include <QApplication>
 #include <QMenuBar>
@@ -80,10 +81,35 @@ MainWindow::MainWindow(QWidget *parent)
     // 加载样式表
     applyTheme(":/light_theme.qss");   // 默认浅色主题
 
-    // 创建默认项目
-    m_project = new ProjectModel(this);
-    connect(m_project, &ProjectModel::changed, this, &MainWindow::updateWindowTitle);
-    buildDefaultProject();
+    // ── ProjectManager：负责项目的新建 / 打开 / 保存 ──────────────
+    m_projectManager = new ProjectManager(this, this);
+    m_projectManager->setSceneMap(&m_sceneMap);
+
+    // ProjectManager 创建/替换项目时，MainWindow 负责 UI 切换
+    connect(m_projectManager, &ProjectManager::projectCreated,
+            this, [this](ProjectModel* newProj) {
+        closeAllPouTabs();
+        m_sceneMap.clear();
+        if (m_projPropSubWin) m_projPropSubWin->close();
+
+        delete m_project;
+        m_project = newProj;
+        m_project->setParent(this);
+        connect(m_project, &ProjectModel::changed,
+                this, &MainWindow::updateWindowTitle);
+        rebuildProjectTree();
+    });
+    connect(m_projectManager, &ProjectManager::firstPouReady,
+            this, &MainWindow::openPouTab);
+    connect(m_projectManager, &ProjectManager::titleUpdateNeeded,
+            this, &MainWindow::updateWindowTitle);
+    connect(m_projectManager, &ProjectManager::statusMessage,
+            this, [this](const QString& msg, int ms){
+        statusBar()->showMessage(msg, ms);
+    });
+
+    // 创建启动示例项目（触发上面的信号链）
+    m_projectManager->buildDefaultProject();
 
     resize(1400, 900);
     updateWindowTitle();
@@ -108,64 +134,6 @@ MainWindow::~MainWindow()
 }
 
 // ============================================================
-// 默认示例项目
-// ============================================================
-void MainWindow::buildDefaultProject() {
-    m_project->projectName = "First Steps";
-
-    // CounterLD
-    PouModel* ld = m_project->addPou("CounterLD", PouType::FunctionBlock, PouLanguage::LD);
-    ld->description = "Counter using Ladder Diagram";
-    ld->variables.append({"Reset", "Input",  "BOOL", "", ""});
-    ld->variables.append({"Out",   "Output", "INT",  "", ""});
-
-    // CounterST
-    PouModel* st = m_project->addPou("CounterST", PouType::FunctionBlock, PouLanguage::ST);
-    st->description = "Counter using Structured Text";
-    st->variables.append({"Reset",             "Input",  "BOOL", "", ""});
-    st->variables.append({"Out",               "Output", "INT",  "", ""});
-    st->variables.append({"Cnt",               "Local",  "INT",  "", ""});
-    st->variables.append({"ResetCounterValue", "Input",  "INT",  "", ""});
-    st->code =
-        "IF Reset THEN\n"
-        "    Cnt := ResetCounterValue;\n"
-        "ELSE\n"
-        "    Cnt := Cnt + 1;\n"
-        "END_IF;\n"
-        "\n"
-        "Out := Cnt;";
-
-    // CounterIL
-    PouModel* il = m_project->addPou("CounterIL", PouType::FunctionBlock, PouLanguage::IL);
-    il->description = "Counter using Instruction List";
-    il->variables.append({"Reset",             "Input",  "BOOL", "", ""});
-    il->variables.append({"Out",               "Output", "INT",  "", ""});
-    il->variables.append({"Cnt",               "Local",  "INT",  "", ""});
-    il->variables.append({"ResetCounterValue", "Input",  "INT",  "", ""});
-    il->code =
-        "LD  Reset\n"
-        "JMPC ResetCnt\n"
-        "(* increment counter *)\n"
-        "LD  Cnt\n"
-        "ADD 1\n"
-        "JMP QuitFb\n"
-        "\n"
-        "ResetCnt:\n"
-        "(* reset counter *)\n"
-        "LD  ResetCounterValue\n"
-        "\n"
-        "QuitFb:\n"
-        "(* save results *)\n"
-        "ST  Cnt\n"
-        "ST  Out";
-
-    m_project->clearDirty();
-
-    // 构建树并打开第一个 POU
-    rebuildProjectTree();
-    if (!m_project->pous.isEmpty())
-        openPouTab(m_project->pous.first());
-}
 
 // ============================================================
 // 菜单栏
@@ -314,10 +282,9 @@ void MainWindow::setupMenuBar()
     connect(aDriverInstall, &QAction::triggered, this, [this]{
         const QString path = QFileDialog::getOpenFileName(
             this, "Select Driver Package", QString(),
-            "Driver Packages (*.cab *.zip);;All Files (*)");
+            "TiZi Driver Packages (*.cab);;All Files (*)");
         if (!path.isEmpty())
-            QMessageBox::information(this, "Driver Install",
-                QString("Driver installation is not yet implemented.\nSelected: %1").arg(path));
+            installDriverCab(path);
     });
 
     auto* aLicenseEditor = extrasMenu->addAction("License Editor");
@@ -1577,117 +1544,12 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
 }
 
 // ============================================================
-// 项目操作
+// 项目操作（委托给 ProjectManager）
 // ============================================================
-void MainWindow::newProject()
-{
-    if (m_project && m_project->isDirty()) {
-        int ret = QMessageBox::question(this, "New Project",
-            "Current project has unsaved changes. Discard them?",
-            QMessageBox::Yes | QMessageBox::No);
-        if (ret != QMessageBox::Yes) return;
-    }
-
-    const QString name = QInputDialog::getText(
-        this, "New Project", "Project name:", QLineEdit::Normal, "Untitled");
-    if (name.trimmed().isEmpty()) return;
-
-    // 清空现有子窗口
-    closeAllPouTabs();
-    m_sceneMap.clear();
-
-    delete m_project;
-    m_project = new ProjectModel(this);
-    connect(m_project, &ProjectModel::changed, this, &MainWindow::updateWindowTitle);
-    m_project->projectName = name.trimmed();
-
-    // 默认创建一个 LD 程序
-    PouModel* pou = m_project->addPou("main", PouType::Program, PouLanguage::LD);
-    m_project->clearDirty();
-
-    rebuildProjectTree();
-    openPouTab(pou);
-    updateWindowTitle();
-}
-
-void MainWindow::openProject()
-{
-    const QString path = QFileDialog::getOpenFileName(
-        this, "Open Project", QString(),
-        "TiZi Project (*.tizi);;XML Files (*.xml);;All Files (*)");
-    if (path.isEmpty()) return;
-
-    // 清空现有子窗口
-    closeAllPouTabs();
-    m_sceneMap.clear();
-
-    delete m_project;
-    m_project = new ProjectModel(this);
-    connect(m_project, &ProjectModel::changed, this, &MainWindow::updateWindowTitle);
-
-    if (!m_project->loadFromFile(path)) {
-        QMessageBox::critical(this, "Open Error",
-            QString("Failed to open:\n%1").arg(path));
-        delete m_project;
-        m_project = nullptr;
-        return;
-    }
-
-    rebuildProjectTree();
-    if (!m_project->pous.isEmpty())
-        openPouTab(m_project->pous.first());
-
-    updateWindowTitle();
-    statusBar()->showMessage(QString("Opened: %1").arg(path), 3000);
-}
-
-// ── 保存前将所有打开的图形场景同步到 PouModel ─────────────────
-static void syncScenesBeforeSave(const QMap<PouModel*, PlcOpenViewer*>& sceneMap)
-{
-    for (auto it = sceneMap.cbegin(); it != sceneMap.cend(); ++it) {
-        PouModel*      pou   = it.key();
-        PlcOpenViewer* scene = it.value();
-        if (!scene) continue;
-        QString xml = scene->toXmlString();
-        if (!xml.isEmpty())
-            pou->graphicalXml = xml;
-    }
-}
-
-void MainWindow::saveProject()
-{
-    if (!m_project) return;
-    if (m_project->filePath.isEmpty()) {
-        saveProjectAs();
-        return;
-    }
-    syncScenesBeforeSave(m_sceneMap);
-    if (!m_project->saveToFile(m_project->filePath)) {
-        QMessageBox::critical(this, "Save Error",
-            QString("Failed to save:\n%1").arg(m_project->filePath));
-        return;
-    }
-    updateWindowTitle();
-    statusBar()->showMessage("Saved.", 3000);
-}
-
-void MainWindow::saveProjectAs()
-{
-    if (!m_project) return;
-    const QString path = QFileDialog::getSaveFileName(
-        this, "Save Project As", m_project->projectName + ".tizi",
-        "TiZi Project (*.tizi);;XML Files (*.xml);;All Files (*)");
-    if (path.isEmpty()) return;
-
-    syncScenesBeforeSave(m_sceneMap);
-    if (!m_project->saveToFile(path)) {
-        QMessageBox::critical(this, "Save Error",
-            QString("Failed to save:\n%1").arg(path));
-        return;
-    }
-    updateWindowTitle();
-    statusBar()->showMessage(QString("Saved: %1").arg(path), 3000);
-}
+void MainWindow::newProject()    { m_projectManager->newProject(); }
+void MainWindow::openProject()   { m_projectManager->openProject(); }
+void MainWindow::saveProject()   { m_projectManager->saveProject(); }
+void MainWindow::saveProjectAs() { m_projectManager->saveProjectAs(); }
 
 // ============================================================
 // 编译：将整个项目 PLCopen XML 转换为 ST 中间代码，显示到控制台
@@ -1715,7 +1577,7 @@ void MainWindow::buildProject()
         QString("[ Build ] Building \"%1\" ...").arg(m_project->projectName));
 
     // ── 自动同步并保存 ──────────────────────────────────────────────
-    syncScenesBeforeSave(m_sceneMap);
+    ProjectManager::syncScenesBeforeSave(m_sceneMap);
     m_project->saveToFile(m_project->filePath);
 
     // ── Step 1/3: 生成 IEC 61131-3 ST ──────────────────────────────
@@ -2185,6 +2047,167 @@ void MainWindow::downloadProject()
 {
     DownloadDialog dlg(this);
     dlg.exec();
+}
+
+// ============================================================
+// Driver 安装：解析 TiZi .cab 包并解压到 <appDir>/drivers/
+// ============================================================
+//
+// .cab 二进制格式（由 tools/pack_driver.py 生成）：
+//   [4B]  Magic  b'TZDR'
+//   [1B]  Version (== 1)
+//   [4B]  Manifest JSON 长度 (uint32 LE)
+//   [N]   Manifest JSON (UTF-8)
+//   [4B]  文件数量 (uint32 LE)
+//   对每个文件：
+//     [2B]  相对路径长度 (uint16 LE)
+//     [N]   相对路径 (UTF-8, '/' 分隔)
+//     [4B]  数据长度 (uint32 LE)
+//     [N]   文件内容
+//
+void MainWindow::installDriverCab(const QString& cabPath)
+{
+    // ── 打开文件 ──────────────────────────────────────────────
+    QFile f(cabPath);
+    if (!f.open(QFile::ReadOnly)) {
+        QMessageBox::critical(this, "Driver Install",
+            "Cannot open file:\n" + cabPath);
+        return;
+    }
+
+    QDataStream ds(&f);
+    ds.setByteOrder(QDataStream::LittleEndian);
+
+    // ── 校验 Magic ────────────────────────────────────────────
+    char magic[4] = {};
+    if (ds.readRawData(magic, 4) != 4 || QByteArray(magic, 4) != "TZDR") {
+        QMessageBox::critical(this, "Driver Install",
+            "Not a valid TiZi driver package.\n(Bad magic bytes)");
+        return;
+    }
+
+    // ── 校验版本 ──────────────────────────────────────────────
+    quint8 version = 0;
+    ds >> version;
+    if (version != 1) {
+        QMessageBox::critical(this, "Driver Install",
+            QString("Unsupported package version: %1\n"
+                    "Please update TiZi to install this driver.").arg(version));
+        return;
+    }
+
+    // ── 读取 Manifest JSON ────────────────────────────────────
+    quint32 manifestLen = 0;
+    ds >> manifestLen;
+    QByteArray manifestBytes(static_cast<int>(manifestLen), '\0');
+    if (ds.readRawData(manifestBytes.data(), static_cast<int>(manifestLen))
+            != static_cast<int>(manifestLen)) {
+        QMessageBox::critical(this, "Driver Install",
+            "Corrupted package (manifest read error).");
+        return;
+    }
+    QJsonParseError jerr;
+    QJsonDocument manifestDoc = QJsonDocument::fromJson(manifestBytes, &jerr);
+    if (manifestDoc.isNull()) {
+        QMessageBox::critical(this, "Driver Install",
+            "Corrupted package (bad manifest JSON):\n" + jerr.errorString());
+        return;
+    }
+    const QJsonObject manifest  = manifestDoc.object();
+    const QString dirName       = manifest["dir_name"].toString();
+    const QString driverName    = manifest["name"].toString();
+    const QString description   = manifest["description"].toString();
+
+    // mode 可能是字符串或数组，统一转为可读字符串
+    QString modeStr;
+    if (manifest["mode"].isArray())
+        modeStr = QString::fromUtf8(
+            QJsonDocument(manifest["mode"].toArray())
+            .toJson(QJsonDocument::Compact));
+    else
+        modeStr = manifest["mode"].toString();
+
+    if (dirName.isEmpty()) {
+        QMessageBox::critical(this, "Driver Install",
+            "Corrupted package (missing dir_name in manifest).");
+        return;
+    }
+
+    // ── 读取文件数量 ──────────────────────────────────────────
+    quint32 fileCount = 0;
+    ds >> fileCount;
+
+    // ── 确认安装路径 ──────────────────────────────────────────
+    const QString installBase = QCoreApplication::applicationDirPath() + "/drivers";
+    const QString installDir  = installBase + "/" + dirName;
+
+    QString confirmMsg =
+        QString("Install driver:\n\n"
+                "  Name:  %1\n"
+                "  Mode:  %2\n"
+                "  Files: %3\n\n"
+                "Install to:\n  %4\n\n"
+                "Continue?")
+        .arg(driverName, modeStr)
+        .arg(fileCount)
+        .arg(installDir);
+
+    if (!description.isEmpty())
+        confirmMsg.prepend(description + "\n\n");
+
+    const auto btn = QMessageBox::question(this, "Install Driver", confirmMsg);
+    if (btn != QMessageBox::Yes)
+        return;
+
+    // ── 解压文件 ──────────────────────────────────────────────
+    QDir().mkpath(installDir);
+    int extracted = 0;
+
+    for (quint32 i = 0; i < fileCount; i++) {
+        quint16 pathLen = 0;
+        ds >> pathLen;
+        QByteArray pathBytes(static_cast<int>(pathLen), '\0');
+        ds.readRawData(pathBytes.data(), static_cast<int>(pathLen));
+        const QString relPath = QString::fromUtf8(pathBytes);
+
+        quint32 dataLen = 0;
+        ds >> dataLen;
+        QByteArray data(static_cast<int>(dataLen), '\0');
+        ds.readRawData(data.data(), static_cast<int>(dataLen));
+
+        // 防止路径穿越（path traversal）
+        const QString fullPath = QDir::cleanPath(installDir + "/" + relPath);
+        if (!fullPath.startsWith(installDir)) {
+            QMessageBox::critical(this, "Driver Install",
+                QString("Security: illegal path in package: %1").arg(relPath));
+            return;
+        }
+
+        QDir().mkpath(QFileInfo(fullPath).absolutePath());
+        QFile outFile(fullPath);
+        if (!outFile.open(QFile::WriteOnly | QFile::Truncate)) {
+            QMessageBox::critical(this, "Driver Install",
+                "Failed to write file:\n" + fullPath);
+            return;
+        }
+        outFile.write(data);
+        extracted++;
+    }
+
+    // ── 安装成功 ──────────────────────────────────────────────
+    m_consoleEdit->appendPlainText(
+        QString("[ Driver ] Installed \"%1\"  →  %2  (%3 files)")
+        .arg(driverName, installDir).arg(extracted));
+    m_consoleTabs->setCurrentWidget(m_consoleEdit);
+    statusBar()->showMessage(
+        QString("Driver \"%1\" installed.").arg(driverName), 4000);
+
+    QMessageBox::information(this, "Driver Install",
+        QString("Driver \"%1\" installed successfully.\n\n"
+                "Location: %2\n"
+                "Files: %3\n\n"
+                "Reopen Project Settings to use the new driver.")
+        .arg(driverName, installDir).arg(extracted));
 }
 
 // ============================================================
