@@ -15,6 +15,7 @@
 - PLCopen/Beremiz `.tizi` 示例：`StGenerator -> iec2iec -> iec2c`
 - PLCopen `traffic.tizi` SFC/FBD 混合示例：`StGenerator -> iec2iec -> iec2c -> Linux driver wrapper`
 - TiZi 原生 `<TiZiProject>` 最小 LD 示例：`StGenerator -> iec2iec -> iec2c`
+- TiZi 原生 LD edge 示例：本机 C driver 验证 rising/falling edge 单扫描周期脉冲
 - TiZi 原生 LD 并联分支示例：多 `connectionPointIn`、falling edge、reset coil
 - TiZi 原生 LD 多输出示例：同一触点驱动多个线圈、变量输入/输出取反
 - TiZi 原生 FBD block 示例：同一 `formalParameter` 多连接合成为布尔 `OR`
@@ -170,6 +171,21 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - `inOutVariable negatedOut="true"` 会在作为上游信号输出时取反。
 - 新增 `native_ld_multi_output_negation.tizi`，覆盖同一触点驱动多个线圈、取反线圈、`inOutVariable` 双向取反和 Linux wrapper 编译。
 
+### 13. 边沿触点扫描周期语义
+
+原风险：rising/falling edge 触点虽然能通过 matiec 编译，但没有确认生成 C 在连续扫描周期中的脉冲行为。
+
+当前状态：
+
+- 新增 `native_ld_edge_scan.tizi`。
+- `verify_build_pipeline.sh` 会编译 matiec 输出的 C，并运行专用测试 driver。
+- 测试覆盖：
+  - 输入保持低电平时无 falling 误触发
+  - 低到高只产生 1 个 rising 脉冲扫描周期
+  - 高电平保持时无重复 rising 脉冲
+  - 高到低只产生 1 个 falling 脉冲扫描周期
+  - 低电平保持时无重复 falling 脉冲
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -180,9 +196,9 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 反馈回路
 - 图元多 `connectionPointOut` 与端口选择
 
-### 2. 边沿触点语义需要硬件/周期级确认
+### 2. 边沿触点真实硬件行为需要确认
 
-当前边沿逻辑按每次 POU 扫描更新 `TIZI_EDGE*`。这通过 matiec 语法和 C 生成验证，但还需要在真实扫描周期中确认与预期 PLC 行为一致。
+当前边沿逻辑已经通过本机 C driver 的扫描周期回归，但还需要在真实 Runtime 任务调度和 IO 刷新路径中确认与预期 PLC 行为一致。
 
 ### 3. XCODE 未做完整运行验证
 

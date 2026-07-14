@@ -59,10 +59,81 @@ compile_linux_driver() {
         -lm
 }
 
+run_edge_scan_test() {
+    local name="native_ld_edge_scan"
+    local test_c="$WORK_DIR/${name}_test.c"
+    local test_bin="$WORK_DIR/${name}_test"
+
+    cat > "$test_c" <<'EDGE_TEST_C'
+#include "iec_std_lib.h"
+#include "POUS.h"
+#include <stdio.h>
+
+TIME __CURRENT_TIME;
+BOOL __DEBUG = 0;
+
+extern void config_init__(void);
+extern void config_run__(unsigned long tick);
+extern MAIN RESOURCE1__MAIN_INSTANCE;
+
+static int check_state(const char *label, int yr, int yf) {
+    int ok = 1;
+    if (RESOURCE1__MAIN_INSTANCE.YR.value != yr) ok = 0;
+    if (RESOURCE1__MAIN_INSTANCE.YF.value != yf) ok = 0;
+    if (!ok) {
+        fprintf(stderr, "%s: expected YR=%d YF=%d, got YR=%u YF=%u\n",
+                label, yr, yf,
+                RESOURCE1__MAIN_INSTANCE.YR.value,
+                RESOURCE1__MAIN_INSTANCE.YF.value);
+        return 1;
+    }
+    return 0;
+}
+
+int main(void) {
+    int failures = 0;
+    config_init__();
+
+    RESOURCE1__MAIN_INSTANCE.B.value = 0;
+    config_run__(0);
+    failures += check_state("initial low", 0, 0);
+
+    RESOURCE1__MAIN_INSTANCE.B.value = 1;
+    config_run__(1);
+    failures += check_state("rising pulse", 1, 0);
+
+    RESOURCE1__MAIN_INSTANCE.B.value = 1;
+    config_run__(2);
+    failures += check_state("held high", 0, 0);
+
+    RESOURCE1__MAIN_INSTANCE.B.value = 0;
+    config_run__(3);
+    failures += check_state("falling pulse", 0, 1);
+
+    RESOURCE1__MAIN_INSTANCE.B.value = 0;
+    config_run__(4);
+    failures += check_state("held low", 0, 0);
+
+    return failures == 0 ? 0 : 1;
+}
+EDGE_TEST_C
+
+    gcc -w \
+        -I "$MATIEC_DIR/lib/C" \
+        -I "$WORK_DIR/${name}_iec2c" \
+        "$test_c" \
+        "$WORK_DIR/${name}_iec2c/config.c" \
+        "$WORK_DIR/${name}_iec2c/resource1.c" \
+        -o "$test_bin" \
+        -lm
+    "$test_bin"
+}
+
 run_case "plcopen_first_steps" "$EDITOR_DIR/tests/first_steps/plc.tizi"
 run_case "plcopen_first_steps_linux" "$EDITOR_DIR/tests/first_steps/plcc.tizi"
 run_case "plcopen_traffic" "$EDITOR_DIR/tests/first_steps/traffic.tizi"
 run_case "native_ld" "$EDITOR_DIR/tests/fixtures/native_ld.tizi"
+run_case "native_ld_edge_scan" "$EDITOR_DIR/tests/fixtures/native_ld_edge_scan.tizi"
 run_case "native_ld_parallel_reset" "$EDITOR_DIR/tests/fixtures/native_ld_parallel_reset.tizi"
 run_case "native_ld_multi_output_negation" "$EDITOR_DIR/tests/fixtures/native_ld_multi_output_negation.tizi"
 run_case "native_fbd_block_multi_input" "$EDITOR_DIR/tests/fixtures/native_fbd_block_multi_input.tizi"
@@ -70,6 +141,9 @@ run_case "native_fbd_block_multi_input" "$EDITOR_DIR/tests/fixtures/native_fbd_b
 grep -q "TIZI_TMP" "$WORK_DIR/native_ld.st"
 grep -q "TIZI_EDGE3" "$WORK_DIR/native_ld.st"
 grep -q "IF TIZI_TMP" "$WORK_DIR/native_ld.st"
+
+grep -q "TIZI_EDGE2" "$WORK_DIR/native_ld_edge_scan.st"
+grep -q "TIZI_EDGE4" "$WORK_DIR/native_ld_edge_scan.st"
 
 grep -q "TIZI_EDGE3" "$WORK_DIR/native_ld_parallel_reset.st"
 grep -q " OR " "$WORK_DIR/native_ld_parallel_reset.st"
@@ -88,9 +162,11 @@ grep -q "INITIAL_STEP Standstill" "$WORK_DIR/plcopen_traffic.st"
 compile_linux_driver "plcopen_traffic"
 compile_linux_driver "plcopen_first_steps_linux"
 compile_linux_driver "native_ld"
+compile_linux_driver "native_ld_edge_scan"
 compile_linux_driver "native_ld_parallel_reset"
 compile_linux_driver "native_ld_multi_output_negation"
 compile_linux_driver "native_fbd_block_multi_input"
+run_edge_scan_test
 
 echo "Build pipeline verification passed."
 echo "Artifacts: $WORK_DIR"

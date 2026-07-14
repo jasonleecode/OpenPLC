@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TiZiProject name="NativeLDEdgeScan" version="1" targetType="Linux" mode="NCC">
+  <pou name="main" type="program" language="LD">
+    <description>Native LD edge contact scan-cycle semantics test</description>
+    <variables>
+      <var name="B" class="Local" type="BOOL" init="" comment=""/>
+      <var name="YR" class="Local" type="BOOL" init="" comment=""/>
+      <var name="YF" class="Local" type="BOOL" init="" comment=""/>
+    </variables>
+    <graphical><![CDATA[LD
+<LD>
+  <leftPowerRail localId="1">
+    <connectionPointOut/>
+  </leftPowerRail>
+  <contact localId="2" negated="false" edge="rising">
+    <variable>B</variable>
+    <connectionPointIn>
+      <connection refLocalId="1"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </contact>
+  <coil localId="3" negated="false" storage="none">
+    <variable>YR</variable>
+    <connectionPointIn>
+      <connection refLocalId="2"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </coil>
+  <contact localId="4" negated="false" edge="falling">
+    <variable>B</variable>
+    <connectionPointIn>
+      <connection refLocalId="1"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </contact>
+  <coil localId="5" negated="false" storage="none">
+    <variable>YF</variable>
+    <connectionPointIn>
+      <connection refLocalId="4"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </coil>
+</LD>]]></graphical>
+  </pou>
+</TiZiProject>
