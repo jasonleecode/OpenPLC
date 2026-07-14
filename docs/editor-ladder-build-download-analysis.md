@@ -2,412 +2,177 @@
 
 检查范围：`editor/` 中从梯形图项目保存、ST 生成、matiec 编译、driver 编译、产物生成，到 `DownloadDialog` 下载到 Runtime B 区的流程。
 
-## 当前状态
+## 当前结论
 
-已完成第一轮修复，并提交为：
+Editor 梯形图/功能块图/SFC 到可下载产物的主链路已经具备可重复验证能力。当前重点风险不再是基础编译链路，而是更复杂 PLCopen 图形语义和真实硬件/真实 WASI-SDK 环境验证。
 
-```text
-972fdf2 Fix editor ladder build and download pipeline
-```
-
-修复后，以下链路已经过验证：
+当前已验证：
 
 - PLCopen/Beremiz `.tizi` 示例：`StGenerator -> iec2iec -> iec2c`
-- PLCopen `traffic.tizi` SFC/FBD 混合示例：`StGenerator -> iec2iec -> iec2c -> Linux driver wrapper`
-- TiZi 原生 `<TiZiProject>` 最小 LD 示例：`StGenerator -> iec2iec -> iec2c`
-- TiZi 原生 LD edge 示例：本机 C driver 验证 rising/falling edge 单扫描周期脉冲
-- TiZi 原生 LD 并联分支示例：多 `connectionPointIn`、falling edge、reset coil
-- TiZi 原生 LD 多输出示例：同一触点驱动多个线圈、变量输入/输出取反
-- TiZi 原生 FBD block 示例：同一 `formalParameter` 多连接合成为布尔 `OR`
-- TiZi 原生 FBD 功能块示例：同一功能块实例的多个输出端口 `Q` / `CV`
-- TiZi 原生 LD 示例继续通过 Linux driver wrapper 编译为本机可执行文件
-- Qt Editor 目标：`cmake --build editor/build --target TiZi --parallel 2`
+- PLCopen `traffic.tizi` SFC/FBD/LD/action/transition 混合示例
+- TiZi 原生 `<TiZiProject>` LD/FBD 示例
+- LD rising/falling edge 的单扫描周期行为
+- LD 并联、多输出、取反、set/reset 线圈
+- FBD block 多输入、多输出端口、共享输出端口
+- PLCopen FBD/LD 反馈回路运行行为
+- Editor build 产物和下载窗口衔接
+- NCC/XCODE 下载镜像格式校验
+- TCP 下载协议桌面服务端回归
+- Linux matiec 和 Linux WAMR 工具校验
+- 轻量 CI 检查
 
-可重复验证脚本：
+默认本地工具：
+
+```text
+QT_ROOT=$HOME/Qt/6.5.3/gcc_64
+editor/tools/matiec_linux
+editor/tools/wasm_linux
+```
+
+Linux 上 `editor/tools/wasm/wasi-sdk` 保留给 macOS 默认工具路径；Linux XCODE 验证需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定。
+
+## 验证入口
+
+完整 Editor 编译链路回归：
 
 ```bash
 editor/tests/verify_build_pipeline.sh
 ```
 
-XCODE/WASM 构建链路验证脚本：
+XCODE/WASM 构建链路验证：
 
 ```bash
 WASI_SDK_DIR=/path/to/wasi-sdk editor/tests/verify_xcode_pipeline.sh
 ```
 
-matiec 工具链校验脚本：
+工具链和协议专项验证：
 
 ```bash
 editor/tests/verify_matiec_tools.sh
-```
-
-TCP 下载协议服务端测试：
-
-```bash
+editor/tests/verify_wamr_linux.sh
+editor/tests/verify_toolchain_manifest.sh
 editor/tests/verify_tcp_runtime_server.sh
 ```
 
-Linux WAMR runtime 工具校验脚本：
-
-```bash
-editor/tests/verify_wamr_linux.sh
-```
-
-工具链 manifest 校验脚本：
-
-```bash
-editor/tests/verify_toolchain_manifest.sh
-```
-
-当前仓库里的 `editor/tools/wasm/wasi-sdk` 保留给 macOS 默认工具路径；Linux 上需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定，避免误用 macOS 工具路径。
-
-默认使用：
-
-```text
-QT_ROOT=$HOME/Qt/6.5.3/gcc_64
-editor/tools/matiec_linux
-```
-
-如果 Qt 安装路径不同，可用：
+Qt 安装路径不同可用：
 
 ```bash
 QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 ```
 
-## 已修复
+## 覆盖矩阵
 
-### 1. 原生 `.tizi` 编译入口
+| 覆盖项 | 主要样例/脚本 | 当前状态 |
+|---|---|---|
+| PLCopen first steps | `editor/tests/first_steps/plc.tizi`、`plcc.tizi` | ST/matiec/C 编译通过 |
+| PLCopen traffic SFC/FBD/LD | `editor/tests/first_steps/traffic.tizi` | SFC action、transition、TON/SR condition 覆盖 |
+| TiZi 原生 LD | `native_ld*.tizi` | 串联、并联、edge、取反、set/reset 覆盖 |
+| TiZi 原生 FBD | `native_fbd_block_multi_input.tizi` | block 同一输入多连接覆盖 |
+| FBD 多输出/共享输出 | `native_fbd_fb_multi_output.tizi` | CTU `Q`/`CV`、共享 `Q` 运行回归覆盖 |
+| PLCopen 反馈回路 | `plcopen_first_steps_linux` C driver | FBD/LD counter 连续扫描和 reset 覆盖 |
+| SFC 多 actionBlock | `plcopen_sfc_multi_actionblock.tizi` | 同一步骤多个 actionBlock 合并覆盖 |
+| 下载协议 | `verify_tcp_runtime_server.sh` | TiZi TCP byte protocol 回归覆盖 |
+| 工具链 | `verify_*_tools.sh`、manifest | Linux matiec/WAMR 校验覆盖 |
+| CI | `.github/workflows/editor-toolchain.yml` | 轻量工具链和协议检查 |
 
-原问题：`ProjectModel::saveTiZiNative()` 保存 `<TiZiProject>`，但 `StGenerator::fromXml()` 只接受 PLCopen `<project>`。
+## 已修复问题
 
-当前状态：
+### 编译入口与基础生成
 
-- `StGenerator` 已支持 `<TiZiProject>`。
+- `StGenerator` 支持 TiZi 原生 `<TiZiProject>`。
 - 原生项目会按 POU、变量、`graphical`/`code` 内容生成 IEC ST。
 - 若存在 Program POU，会生成最小默认 `CONFIGURATION`。
+- Linux CMake 默认使用 `tools/matiec_linux`，macOS 使用 `tools/matiec_mac`。
+- `verify_matiec_tools.sh` 会检查工具可执行性、平台二进制类型，并运行 smoke test。
 
-### 2. LD 串联触点临时变量
+### LD/FBD 图形语义
 
-原问题：串联触点生成 `_t1 := ...`，但没有声明 `_t1`。
-
-当前状态：
-
-- LD/FBD 转 ST 时会收集布尔临时变量。
-- 生成 `TIZI_TMP* : BOOL;` 声明。
-- 最小原生 LD fixture 已覆盖该路径。
-
-### 3. LD 边沿触点与 Set/Reset 线圈
-
-原问题：`PlcOpenViewer` 保存 `edge`/`storage`，但 `StGenerator` 忽略。
-
-当前状态：
-
-- contact `edge="rising"` / `edge="falling"` 会生成带状态记忆的脉冲逻辑。
+- LD/FBD 布尔临时变量会声明为 `TIZI_TMP* : BOOL;`。
+- contact `edge="rising"` / `edge="falling"` 会生成带状态记忆的单扫描周期脉冲逻辑。
 - coil `storage="set"` / `storage="reset"` 会生成条件置位/复位。
-- 相关状态变量会声明为 `TIZI_EDGE* : BOOL;`。
+- contact、coil、outVariable、inOutVariable 保留所有 `connectionPointIn/connection`，多个布尔输入合成为 `OR`。
+- block 同一 `formalParameter` 的多条输入连接会合成为 `OR`。
+- `connection formalParameter="..."` 用于选择上游 block 输出端口。
+- `outVariable negated`、`inOutVariable negatedIn/negatedOut` 已按 PLCopen 语义取反。
+- FBD 功能块多输出端口已覆盖，例如 `CTU.Q` 和 `CTU.CV`。
+- 同一功能块输出被多个下游共享时，不会重复调用功能块；运行测试覆盖 CTU `Q` 共享输出。
 
-### 4. Build 产物与下载窗口衔接
+### PLCopen SFC/action/transition
 
-原问题：Build 成功只打印产物路径，`DownloadDialog` 不知道最近一次产物。
+- POU 级 `actions` 会生成 IEC `ACTION`，支持 ST/IL/LD/FBD/SFC body。
+- SFC `actionBlock` 会保留 reference action 调用和 `S/R/D/P/N` qualifier，包括 duration 参数。
+- 同一 step 的多个 `actionBlock` 会追加合并，不再互相覆盖。
+- 命名 transition 的 ST/FBD/LD body 会展开为 SFC transition 条件表达式。
+- SFC transition condition 直接连接无副作用布尔图形时，会解析 `inVariable`、`leftPowerRail`、`contact`、无实例 `NOT`/`AND`/`OR` block。
+- SFC transition condition 连接 TON/SR 等有状态功能块时，会生成 `TIZI_SFC_TRANS* : BOOL` 和自动 `ACTION TIZI_TRANS*_COND`，在源 step 激活期间调用功能块并写入临时条件变量。
+- `NOT` FBD block 会生成标准 `NOT (<expr>)`，避免 matiec 不接受 `NOT(IN := ...)`。
 
-当前状态：
+### 构建产物与下载
 
-- `MainWindow` 保存 `m_lastBuildOutput`。
+- Build 成功后 `MainWindow` 保存 `m_lastBuildOutput`。
 - NCC post-build 后保存最终 `.bin` 或可执行产物路径。
 - XCODE build 后保存 `.xcode.bin` 路径。
 - `downloadProject()` 会预填最近一次构建产物。
-- 下载前会校验文件格式、magic 和 B 区大小。
-
-### 5. XCODE 下载镜像头
-
-原问题：Runtime XCODE 需要 `[magic][wasm_size][wasm]`，Editor 只输出裸 `.wasm`。
-
-当前状态：
-
-- XCODE build 会生成 `*.xcode.bin`。
-- 文件头使用小端 `XCODE_WASM_MAGIC = 0x57415300` 和 wasm size。
-- 下载窗口默认选择该镜像，而不是裸 `.wasm`。
-
-### 6. Linux matiec 工具路径
-
-原问题：Linux 上 CMake 仍默认 `tools/matiec_mac`。
-
-当前状态：
-
-- CMake 按平台选择 `tools/matiec_linux` 或 `tools/matiec_mac`。
-- Runtime 查找时要求 `iec2iec` 和 `iec2c` 都存在且可执行。
-- 当前仓库已包含 `editor/tools/matiec_linux`。
-- 新增 `verify_matiec_tools.sh`，检查工具可执行性、平台二进制类型，并运行 `iec2iec` / `iec2c` smoke test。
-
-### 7. B 区大小限制
-
-原问题：LPC824 `max_size_bytes` 只显示，不阻止。
-
-当前状态：
-
-- NCC post-build 后会检查 `max_size_bytes`。
-- 超限会 Build 失败，不再继续暴露为可下载产物。
-- XCODE 镜像会按 driver `memory_map.user_flash_size_kb` 检查大小。
-- `DownloadDialog` 下载前也会检查文件不超过 Runtime B 区 16KB。
-
-### 8. 下载文件防误选
-
-原问题：Build 后会预填正确产物，但用户仍可 Browse 任意文件。
-
-当前状态：
-
-- 只接受 NCC `.bin` 镜像或 XCODE `.xcode.bin` 镜像。
 - NCC 镜像要求 offset 0 为 `USER_LOGIC_MAGIC = 0xDEADBEEF`。
-- XCODE 镜像要求 offset 0 为 `XCODE_WASM_MAGIC = 0x57415300`，并校验 header 中的 wasm size 与文件长度一致。
+- XCODE 镜像要求 offset 0 为 `XCODE_WASM_MAGIC = 0x57415300`，并校验 header wasm size 与文件长度一致。
+- NCC/XCODE 产物都会按 Runtime B 区大小限制检查。
+- XCODE build 会生成 `[magic][wasm_size][wasm]` 格式的 `*.xcode.bin`，下载窗口默认选择该镜像。
 
-### 9. LD 并联分支与多输入连接
+### 工具链与 CI
 
-原问题：`StGenerator` 解析 contact、coil、outVariable、inOutVariable 时只读取第一个 `<connection>`，并联支路或多个输入连接会被静默丢弃。
+- `verify_xcode_pipeline.sh` 覆盖 `StGenerator -> iec2c -> wasi-clang -> .wasm -> .xcode.bin`，可选调用 Linux `iwasm` 执行 `plc_init` / `plc_run`。
+- `verify_wamr_linux.sh` 校验 Linux `iwasm 2.4.3`、WAMR 头文件和 `libiwasm.a`，并链接最小 C 程序。
+- `editor/tools/toolchain_manifest.json` 记录工具类型、平台、版本、路径和验证脚本。
+- `verify_toolchain_manifest.sh` 校验 manifest schema、唯一 ID、必需字段和路径存在性；对 macOS symlink 使用 `lexists`。
+- `.github/workflows/editor-toolchain.yml` 覆盖 shell 语法、`git diff --check`、matiec、manifest、TCP runtime server、Linux WAMR 和 XCODE skip path。
+- macOS `editor/tools/wasm` 目录保留；Linux 上通过 `WASI_SDK_DIR` / `WAMR_IWASM` 使用本机工具。
 
-当前状态：
+### TCP 下载协议
 
-- 这些 LD/FBD 图元会保留所有 `connectionPointIn/connection`。
-- 多个布尔输入会生成 `OR` 表达式。
-- 新增 `native_ld_parallel_reset.tizi`，覆盖：
-  - 左母线并联到两个触点
-  - falling edge contact
-  - 多输入 reset coil
-  - `StGenerator -> iec2iec -> iec2c -> Linux driver wrapper`
+- `TcpTransport` 已通过 `QTcpSocket` 接入下载协议。
+- 新增 `editor/tests/tools/tizi_tcp_runtime_server.py`，在桌面 Linux 上模拟 `runtime/app/runtime.c` 的 TiZi 字节帧协议。
+- `verify_tcp_runtime_server.sh` 覆盖 `PING`、`ERASE`、`WRITE_PAGE`、`VERIFY`、`GET_STATUS`、`SET_RUN`、`READ_IO`、`RESET`。
+- `verify_build_pipeline.sh` 会调用 TCP 协议测试，避免下载协议退化但编译测试仍通过。
 
-### 10. Block 输入形式参数多连接
-
-原问题：block 的每个输入变量只读取第一条 `<connection>`，如果同一 `formalParameter` 有多条输入来源，后续连接会被静默丢弃。
-
-当前状态：
-
-- block 输入会保留输入脚上的所有连接。
-- 按目标 `formalParameter` 分组，同一参数的多个布尔来源会合成为 `OR` 表达式。
-- `connection formalParameter="..."` 仍用于选择上游 block 的输出端口。
-- 新增 `native_fbd_block_multi_input.tizi`，覆盖 `AND(IN1 := (A) OR (B), IN2 := C)` 并通过 `iec2iec -> iec2c -> Linux driver wrapper`。
-
-### 11. Beremiz HMI_BOOL 类型兼容
-
-原问题：`traffic.tizi` 的 `<dataTypes/>` 为空，但主程序变量使用 Beremiz/SVGHMI 扩展类型 `HMI_BOOL`，生成 ST 后 matiec 会在变量声明处报错。
-
-当前状态：
-
-- `HMI_BOOL` 会在 ST 生成时降级为 IEC 标准 `BOOL`。
-- `traffic.tizi` 已加入 `verify_build_pipeline.sh`，覆盖 SFC/FBD 混合样例、标准库 FB、多输出端口引用和 Linux wrapper 编译。
-
-### 12. LD 多输出和变量取反
-
-原问题：`outVariable negated` 以及 `inOutVariable negatedIn/negatedOut` 被解析链路忽略，相关图元在生成 ST 时不会按 PLCopen 语义取反。
-
-当前状态：
-
-- `outVariable negated="true"` 会生成取反赋值。
-- `inOutVariable negatedIn="true"` 会在写入变量时取反。
-- `inOutVariable negatedOut="true"` 会在作为上游信号输出时取反。
-- 新增 `native_ld_multi_output_negation.tizi`，覆盖同一触点驱动多个线圈、取反线圈、`inOutVariable` 双向取反和 Linux wrapper 编译。
-
-### 13. 边沿触点扫描周期语义
-
-原风险：rising/falling edge 触点虽然能通过 matiec 编译，但没有确认生成 C 在连续扫描周期中的脉冲行为。
-
-当前状态：
-
-- 新增 `native_ld_edge_scan.tizi`。
-- `verify_build_pipeline.sh` 会编译 matiec 输出的 C，并运行专用测试 driver。
-- 测试覆盖：
-  - 输入保持低电平时无 falling 误触发
-  - 低到高只产生 1 个 rising 脉冲扫描周期
-  - 高电平保持时无重复 rising 脉冲
-  - 高到低只产生 1 个 falling 脉冲扫描周期
-  - 低电平保持时无重复 falling 脉冲
-
-### 14. XCODE 构建链路可验证化
-
-原风险：XCODE 只修复了 `.xcode.bin` 镜像头，但没有独立脚本验证 `StGenerator -> iec2c -> wasi-clang -> .wasm -> .xcode.bin`。
-
-当前状态：
-
-- 新增 `verify_xcode_pipeline.sh`。
-- 脚本会生成 ST、运行 `iec2c`、调用 WASI-SDK `clang` 生成 `.wasm`、生成 `.xcode.bin`，并校验：
-  - XCODE magic `0x57415300`
-  - header 中 wasm size 与实际 `.wasm` 一致
-  - 镜像 payload 与 `.wasm` 完全一致
-  - 如果 `llvm-objdump` 可用，检查 `plc_init` / `plc_run` 导出
-- Editor 查找 WASI-SDK 时支持 `WASI_SDK_DIR` 环境变量，便于 Linux 本机或 CI 指定工具链路径。
-
-### 15. Editor 占位入口清理
-
-原问题：Editor 菜单和下载窗口中仍有多个用户可见的 “not implemented / coming soon” 占位入口。
-
-当前状态：
+### Editor 占位入口
 
 - PLC Browser 菜单会打开只读变量浏览器，按 POU 汇总变量名、类型、作用域和初始值。
 - License Editor 菜单改为 License Information，可查看项目元信息和仓库 LICENSE 内容。
-- Ethernet 下载标签页文案已改为实际 TCP 传输说明；`TcpTransport` 已通过 `QTcpSocket` 接入下载协议。
-- 未知 POU 语言的兜底文案改为明确的 unsupported language；LD/FBD/SFC 仍走统一图形编辑器。
-
-### 16. Ethernet 下载协议服务端回归
-
-原风险：Editor 端 TCP transport 已接入，但缺少服务端侧协议回归，后续改动可能破坏 TiZi 下载帧格式而不被测试发现。
-
-当前状态：
-
-- 新增 `editor/tests/tools/tizi_tcp_runtime_server.py`，在桌面 Linux 上模拟 `runtime/app/runtime.c` 使用的 TiZi 字节帧协议。
-- 新增 `verify_tcp_runtime_server.sh`，覆盖 `PING`、`ERASE`、`WRITE_PAGE`、`VERIFY`、`GET_STATUS`、`SET_RUN`、`READ_IO`、`RESET`。
-- `verify_build_pipeline.sh` 会调用该测试，确保编译链路验证时同时检查 TCP 下载协议基础语义。
-- 该服务是桌面测试替身；真实 MCU Ethernet server 仍需要结合具体网络栈和硬件环境实现/验证。
-
-### 17. Linux WAMR runtime 工具校验
-
-原风险：仓库新增了 `editor/tools/wasm_linux`，但缺少自动检查确认 Linux `iwasm`、WAMR 头文件和静态库能在当前机器实际运行/链接。
-
-当前状态：
-
-- 新增 `verify_wamr_linux.sh`。
-- 脚本会检查 `iwasm` 是 Linux x86_64 ELF、版本为 `2.4.3`，并确认 `libiwasm.a` 与 `wasm_export.h`、`wasm_c_api.h`、`lib_export.h` 存在。
-- 脚本会编译并链接一个最小 C 程序调用 `wasm_runtime_get_version()`，确认 WAMR SDK 头文件和静态库组合可用。
-
-### 18. WASI/WAMR 工具路径平台隔离
-
-原风险：`editor/tools/wasm/wasi-sdk` 和 `editor/tools/wasm/wamrc` 是 macOS 工具路径/二进制，在 Linux 上不可用，容易被误认为跨平台工具。
-
-当前状态：
-
-- 保留 macOS 工具目录，不删除 `editor/tools/wasm` 下已有内容。
-- Linux XCODE 验证文案改为要求 native `WASI_SDK_DIR` / `WAMR_IWASM`。
-- Editor 找不到 WASI-SDK 时会明确提示设置 `WASI_SDK_DIR` 或安装到默认位置。
-
-### 19. Editor 工具链轻量 CI
-
-原风险：本地已有验证脚本，但远端提交/PR 没有自动检查，工具链文件或协议测试退化时只能靠人工运行脚本发现。
-
-当前状态：
-
-- 新增 `.github/workflows/editor-toolchain.yml`。
-- CI 覆盖 shell 语法、`git diff --check`、matiec 工具校验、TCP runtime 协议服务端测试、Linux WAMR runtime 工具校验。
-- XCODE 脚本在未安装 WASI-SDK 的 runner 上会验证 skip path；安装 native WASI-SDK 后可通过 `REQUIRE_XCODE_TOOLS=1` 扩展为强制验证。
-
-### 20. FBD 功能块多输出端口回归
-
-原风险：PLCopen/FBD 中功能块实例可暴露多个输出端口，例如 `CTU.Q` 与 `CTU.CV`。如果编译器只取首个输出端口，后续连接会生成空表达式或错误变量。
-
-当前状态：
-
-- 新增 `native_fbd_fb_multi_output.tizi`。
-- `verify_build_pipeline.sh` 会验证 `Counter(CU := CU, PV := 5, R := R);`、`Done := Counter.Q;`、`DoneMirror := Counter.Q;`、`Count := Counter.CV;`。
-- fixture 继续通过 `iec2c` 和 Linux driver wrapper 编译。
-- 新增本机运行测试，驱动 CTU 上升沿计数到 5，确认 `Q` 的两个下游一致，`CV` 递增，reset 后清零。
-
-### 21. 工具链 manifest
-
-原风险：matiec、WASI-SDK、WAMR/iwasm、wamrc 分散在不同目录，哪些是 Linux 可用、哪些是 macOS 专用只能靠人工阅读目录判断。
-
-当前状态：
-
-- 新增 `editor/tools/toolchain_manifest.json`，记录工具类型、平台、版本、路径和验证脚本。
-- 新增 `verify_toolchain_manifest.sh`，校验 manifest schema、唯一 ID、必需字段和路径存在性；对 macOS symlink 使用 `lexists`，保留跨平台目录。
-- CI 已接入 manifest 校验。
-
-### 22. PLCopen SFC action/transition 图形体
-
-原风险：PLCopen POU 级 `actions` 中的 LD/FBD body 没有生成到 ST；SFC `actionBlock` 中的 `<reference name="...">` 也会被忽略。`traffic.tizi` 中 `BLINK_ORANGE_LIGHT` 的 LD 定时闪烁逻辑因此丢失。
-
-同时，命名 transition（例如 `STOP`）的 FBD body 没有展开，SFC `<condition><reference name="STOP"/>` 会退化为默认 `TRUE`，改变状态机行为。
-
-当前状态：
-
-- `StGenerator` 会生成 POU 级 `ACTION`，支持 action body 中的 ST/IL/LD/FBD/SFC。
-- SFC `actionBlock` 会保留 reference action 调用和 `S/R/D/P/N` qualifier，包括 duration 参数。
-- 命名 transition 的 ST/FBD/LD body 会展开为 SFC transition 条件表达式。
-- `NOT` FBD block 会生成标准 `NOT (<expr>)` 表达式，避免在 transition 条件里生成 matiec 不接受的 `NOT(IN := ...)`。
-- `verify_build_pipeline.sh` 已用 `traffic.tizi` 覆盖 `BLINK_ORANGE_LIGHT`、TON/R_TRIG 调用、duration action 和 `STOP` transition 展开。
-
-### 23. SFC transition 直接连接 LD/FBD 条件
-
-原风险：PLCopen SFC transition 的 `<condition>` 可以直接连接图形图元，例如 `traffic.tizi` 中 `PEDESTRIAN_RED -> Standstill` 的条件连接到一个 LD negated contact。此前这类 condition 没有解析，会退化成默认 `TRUE`。
-
-当前状态：
-
-- SFC transition condition 会尝试解析直接连接的无副作用布尔图形：`inVariable`、`leftPowerRail`、`contact`、以及无实例的简单 `NOT`/`AND`/`OR` block。
-- 遇到 TON/SR/CTU 等有状态功能块时暂不展开，避免只引用 `.Q` 但漏掉功能块调用。
-- `verify_build_pipeline.sh` 已断言 `traffic.tizi` 中 `PEDESTRIAN_RED -> Standstill` 生成 `:= NOT SWITCH_BUTTON;`。
-
-### 24. PLCopen FBD/LD 反馈回路运行回归
-
-原风险：`plc.tizi` 的 `CounterFBD` 和 `CounterLD` 使用 `Cnt -> ADD -> SEL -> Cnt` 反馈回路。仅检查生成 ST 和 matiec 编译无法确认连续扫描中是否按旧值递增。
-
-当前状态：
-
-- `verify_build_pipeline.sh` 新增本机 C driver，运行 `plcopen_first_steps_linux` 的 matiec 输出。
-- 测试覆盖 FBD/LD counter 连续扫描递增：`1 -> 2`。
-- 测试覆盖 reset 扫描回到 `ResetCounterValue=17`，随后继续递增到 `18`。
-
-### 25. SFC transition 有状态图形条件
-
-原风险：SFC transition condition 中如果连接 TON/SR 等有状态功能块，不能只在 transition 条件里引用 `.Q`，还必须在源 step 激活期间调用这些功能块。
-
-当前状态：
-
-- `StGenerator` 会为这类 transition condition 生成 `TIZI_SFC_TRANS* : BOOL` 临时变量。
-- 生成自动 `ACTION TIZI_TRANS*_COND`，在其中按依赖调用有状态功能块并写入临时条件变量。
-- 自动 action 会挂到 transition 的来源 step 上，例如 `traffic.tizi` 的 `GREEN` step 会调用 `TIZI_TRANS37_COND(N)`。
-- `verify_build_pipeline.sh` 已断言 `SR0`、`TON3`、`TIZI_SFC_TRANS37` 的生成形态。
-
-### 26. SFC 同一步骤多个 actionBlock
-
-原风险：PLCopen 允许同一个 step 连接多个 `actionBlock`。此前 `sfcToText()` 会用后一个 actionBlock 覆盖前一个，导致同一步骤上的部分 action 丢失。
-
-当前状态：
-
-- 同一 step 的多个 actionBlock 会追加合并。
-- 新增 `plcopen_sfc_multi_actionblock.tizi`，覆盖同一 initial step 同时调用 `Start_act0(N)` 和 `Start_act1(N)`。
-- fixture 继续通过 `iec2c` 和 Linux driver wrapper 编译。
+- Ethernet 下载标签页文案已改为实际 TCP 传输说明。
+- 未知 POU 语言兜底文案改为明确的 unsupported language；LD/FBD/SFC 仍走统一图形编辑器。
 
 ## 剩余风险
 
-### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
+### 1. 复杂 PLCopen LD/FBD/SFC 语义
 
-当前 `StGenerator` 已覆盖基础路径，并已补充 PLCopen action/transition 图形体回归，但仍不是完整 PLCopen 图形语言编译器。需要继续测试：
+当前 `StGenerator` 已覆盖基础路径和多项复杂 PLCopen 图形路径，但仍不是完整 PLCopen 图形语言编译器。仍建议继续补：
 
-- block 多输出端口在大型 PLCopen 样例中的完整回归
-- block 多输出端口/共享输出已有最小 CTU fixture 和运行回归；仍需在大型 PLCopen 样例中完整回归
-- 反馈回路已有 `CounterFBD` / `CounterLD` 最小运行回归；仍需更复杂环路样例
-- 图元多 `connectionPointOut` 与端口选择
-- SFC transition condition 中带 TON/SR 等有状态功能块的图形条件已有 `traffic.tizi` 回归；仍需更复杂多 transition 共享图形样例
-- SFC 多 actionBlock 已有最小 fixture 覆盖；仍需大型 PLCopen 样例回归
+- 更大型 PLCopen 样例完整回归。
+- 更复杂反馈环路样例。
+- 多 transition 共享同一有状态图形条件网络的调用顺序。
+- 更多标准库功能块的端口组合和类型组合。
 
-### 2. 边沿触点真实硬件行为需要确认
+### 2. 真实硬件行为
 
-当前边沿逻辑已经通过本机 C driver 的扫描周期回归，但还需要在真实 Runtime 任务调度和 IO 刷新路径中确认与预期 PLC 行为一致。
+边沿触点、下载复位、B 区切换、IO 刷新等路径已通过本机 driver 或协议替身覆盖基础语义，但仍需要在真实 Runtime 任务调度和真实 IO 刷新路径中确认。
 
-### 3. XCODE/WAMR 真实运行验证
+### 3. XCODE/WAMR 真实运行
 
-已有 XCODE 构建和镜像格式验证脚本，也已加入 Linux `iwasm` runtime 校验；但当前机器缺少可用 Linux WASI-SDK。仍需要在安装工具链后验证：
+已有 XCODE 构建和镜像格式验证脚本，也已加入 Linux `iwasm` runtime 校验；但当前机器缺少可用 Linux WASI-SDK。安装工具链后仍需验证：
 
-- `verify_xcode_pipeline.sh` 的真实 wasm 编译路径
-- `.xcode.bin` 下载到 Runtime B 区
-- WAMR/iwasm 加载镜像
-- `plc_init()` / `plc_run(ms)` 实际调用
+- `verify_xcode_pipeline.sh` 的真实 wasm 编译路径。
+- `.xcode.bin` 下载到 Runtime B 区。
+- WAMR/iwasm 加载镜像。
+- `plc_init()` / `plc_run(ms)` 实际调用。
 
 ### 4. matiec 二进制交付方式
 
-当前方案能工作，并已增加工具链校验脚本；但二进制入库仍会带来仓库体积和平台兼容风险。可选后续方案：
+当前二进制入库方案能工作，并已有工具校验脚本；但仍存在仓库体积和平台兼容风险。可选后续方案：
 
 - 保留当前二进制，作为开发便利工具。
 - 增加构建脚本，从 matiec 源码构建本机工具。
-- 在 CI 中验证工具可执行。
+- 在 CI 中验证或缓存工具 artifact。
 
 ### 5. Ethernet Runtime server side
 
 Editor 端 TCP transport 已可用，桌面 TiZi TCP runtime server 已覆盖基础协议回归。真实 Runtime 侧仍需要在 MCU 网络栈中实现或确认 TCP server，把现有下载协议承载到 Ethernet，并在硬件上验证擦写、校验、复位与运行控制。
-
-## 未提交的样例文件
-
-当前工作区仍有一个用户已有修改：
-
-```text
-M editor/tests/first_steps/plcc.tizi
-```
-
-观察到的差异主要是 XML 属性顺序/格式被 Qt DOM 重写，新增 `TiZiBuild`，以及一处 `CounterLD` 中 block 位置从 `y="87"` 变为 `y="90"`。
-
-建议单独确认该文件是否应作为样例更新提交；不要混入编译链路修复提交。
