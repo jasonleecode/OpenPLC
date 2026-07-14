@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "description": "TiZi editor toolchain inventory. Relative paths are from the repository root.",
+  "tools": [
+    {
+      "id": "matiec-linux",
+      "kind": "iec61131-compiler",
+      "platform": "linux-x86_64",
+      "version": "0.1",
+      "paths": [
+        "editor/tools/matiec_linux/iec2iec",
+        "editor/tools/matiec_linux/iec2c",
+        "editor/tools/matiec_linux/lib"
+      ],
+      "verify": "editor/tests/verify_matiec_tools.sh"
+    },
+    {
+      "id": "matiec-macos",
+      "kind": "iec61131-compiler",
+      "platform": "macos-arm64",
+      "version": "0.1",
+      "paths": [
+        "editor/tools/matiec_mac/iec2iec",
+        "editor/tools/matiec_mac/iec2c",
+        "editor/tools/matiec_mac/lib"
+      ]
+    },
+    {
+      "id": "wasi-sdk-default",
+      "kind": "wasm-c-compiler",
+      "platform": "native",
+      "version": "external",
+      "paths": [
+        "editor/tools/wasm/wasi-sdk"
+      ],
+      "override_env": "WASI_SDK_DIR",
+      "notes": "The in-tree path is kept as the default lookup location. Linux developers should use WASI_SDK_DIR for a native installation."
+    },
+    {
+      "id": "wamr-iwasm-linux",
+      "kind": "wasm-runtime",
+      "platform": "linux-x86_64",
+      "version": "2.4.3",
+      "paths": [
+        "editor/tools/wasm_linux/bin/iwasm",
+        "editor/tools/wasm_linux/lib/libiwasm.a",
+        "editor/tools/wasm_linux/include/wasm_export.h",
+        "editor/tools/wasm_linux/include/wasm_c_api.h",
+        "editor/tools/wasm_linux/include/lib_export.h"
+      ],
+      "verify": "editor/tests/verify_wamr_linux.sh"
+    },
+    {
+      "id": "wamr-wamrc-macos",
+      "kind": "wasm-aot-compiler",
+      "platform": "macos-arm64",
+      "version": "2.4.3",
+      "paths": [
+        "editor/tools/wasm/wamrc/wamrc",
+        "editor/tools/wasm/wamrc/wamrc-2.4.3"
+      ],
+      "notes": "Current XCODE build path produces .wasm and does not call wamrc."
+    }
+  ]
+}

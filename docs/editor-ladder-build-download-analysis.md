@@ -53,6 +53,12 @@ Linux WAMR runtime 工具校验脚本：
 editor/tests/verify_wamr_linux.sh
 ```
 
+工具链 manifest 校验脚本：
+
+```bash
+editor/tests/verify_toolchain_manifest.sh
+```
+
 当前仓库里的 `editor/tools/wasm/wasi-sdk` 保留给 macOS 默认工具路径；Linux 上需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定，避免误用 macOS 工具路径。
 
 默认使用：
@@ -289,6 +295,16 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 新增 `native_fbd_fb_multi_output.tizi`。
 - `verify_build_pipeline.sh` 会验证 `Counter(CU := CU, PV := 5, R := R);`、`Done := Counter.Q;`、`Count := Counter.CV;`。
 - fixture 继续通过 `iec2c` 和 Linux driver wrapper 编译。
+
+### 21. 工具链 manifest
+
+原风险：matiec、WASI-SDK、WAMR/iwasm、wamrc 分散在不同目录，哪些是 Linux 可用、哪些是 macOS 专用只能靠人工阅读目录判断。
+
+当前状态：
+
+- 新增 `editor/tools/toolchain_manifest.json`，记录工具类型、平台、版本、路径和验证脚本。
+- 新增 `verify_toolchain_manifest.sh`，校验 manifest schema、唯一 ID、必需字段和路径存在性；对 macOS symlink 使用 `lexists`，保留跨平台目录。
+- CI 已接入 manifest 校验。
 
 ## 剩余风险
 

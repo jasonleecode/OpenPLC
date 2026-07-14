@@ -2,6 +2,18 @@
 
 This directory stores tool binaries used by the TiZi editor build pipeline.
 
+The checked-in tool inventory is recorded in:
+
+```text
+editor/tools/toolchain_manifest.json
+```
+
+Verify the manifest with:
+
+```bash
+editor/tests/verify_toolchain_manifest.sh
+```
+
 ## matiec
 
 Required layout:
