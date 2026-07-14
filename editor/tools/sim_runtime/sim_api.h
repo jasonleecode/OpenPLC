@@ -16,6 +16,7 @@ typedef struct {
     void *value;
     int forced;
     double forced_number;
+    int traced;
 } SimVar;
 
 extern SimVar sim_vars[];

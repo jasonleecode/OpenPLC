@@ -254,6 +254,59 @@ static void handle_read_vars(const char *line)
     fflush(stdout);
 }
 
+static void handle_set_trace_variables(const char *line)
+{
+    for (size_t i = 0; i < sim_var_count; ++i)
+        sim_vars[i].traced = 0;
+
+    const char *names = strstr(line, "\"names\"");
+    if (names) {
+        const char *p = strchr(names, '[');
+        const char *end = p ? strchr(p, ']') : NULL;
+        while (p && end && p < end) {
+            while (p < end && *p != '"') p++;
+            if (p >= end) break;
+            p++;
+
+            char name[160];
+            size_t n = 0;
+            while (p < end && *p && *p != '"' && n + 1 < sizeof(name)) {
+                if (*p == '\\' && p[1])
+                    p++;
+                name[n++] = *p++;
+            }
+            name[n] = '\0';
+
+            SimVar *var = find_var(name);
+            if (var)
+                var->traced = 1;
+            while (p < end && *p != ',') p++;
+        }
+    }
+
+    fputs("{\"ok\":true}\n", stdout);
+    fflush(stdout);
+}
+
+static void handle_trace_data(void)
+{
+    fputs("{\"ok\":true,\"tick\":", stdout);
+    printf("%lu", g_tick);
+    fputs(",\"vars\":[", stdout);
+
+    int first = 1;
+    for (size_t i = 0; i < sim_var_count; ++i) {
+        if (!sim_vars[i].traced)
+            continue;
+        if (!first) putchar(',');
+        print_var(&sim_vars[i]);
+        first = 0;
+    }
+
+    fputs("]}\n", stdout);
+    fflush(stdout);
+}
+
 static void handle_write_var(const char *line, int force)
 {
     char name[160];
@@ -327,6 +380,10 @@ static int handle_command(char *line)
         print_status();
     } else if (command_is(line, "readVars")) {
         handle_read_vars(line);
+    } else if (command_is(line, "setTraceVariables")) {
+        handle_set_trace_variables(line);
+    } else if (command_is(line, "traceData")) {
+        handle_trace_data();
     } else if (command_is(line, "writeVar")) {
         handle_write_var(line, 0);
     } else if (command_is(line, "forceVar")) {

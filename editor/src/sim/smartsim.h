@@ -2,6 +2,8 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QVariant>
+#include <QVector>
 #include <QWidget>
 
 class QLabel;
@@ -9,7 +11,10 @@ class ProjectModel;
 class QProcess;
 class QPushButton;
 class QProgressBar;
+class QTableWidget;
+class SimDebugSession;
 class QTimer;
+struct SimDebugValue;
 
 class SmartSimWidget : public QWidget {
     Q_OBJECT
@@ -38,7 +43,11 @@ private:
     void sendCommand(const QJsonObject& command);
     void requestVariables();
     void handleRuntimeLine(const QByteArray& line);
-    void handleRuntimeVariables(const QJsonArray& vars);
+    void handleRuntimeVariables(const QVector<SimDebugValue>& vars);
+    void updateWatchTable(const QVector<SimDebugValue>& vars);
+    QString selectedWatchVariable() const;
+    void forceSelectedVariable();
+    void releaseSelectedVariable();
     void stopRuntime();
     void setRunState(RunState state);
     void updateStatusLabels();
@@ -47,6 +56,8 @@ private:
     void appendLog(const QString& message);
     static QString ledStyle(bool on, const QString& onColor);
     static QString stateText(RunState state);
+    static QString valueText(const QVariant& value);
+    static QVariant parseForceValue(const QString& type, const QString& text, bool* ok);
 
     QLabel* m_stateLed = nullptr;
     QLabel* m_stateText = nullptr;
@@ -59,6 +70,7 @@ private:
     QPushButton* m_pauseButton = nullptr;
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_stepButton = nullptr;
+    QTableWidget* m_watchTable = nullptr;
 
     QList<QLabel*> m_diLeds;
     QList<QLabel*> m_doLeds;
@@ -68,6 +80,7 @@ private:
     QTimer* m_scanTimer = nullptr;
     QTimer* m_pollTimer = nullptr;
     QProcess* m_process = nullptr;
+    SimDebugSession* m_debugSession = nullptr;
     ProjectModel* m_project = nullptr;
     QString m_simBinary;
     RunState m_state = RunState::Stopped;

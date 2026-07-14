@@ -151,6 +151,10 @@ hello = request({"cmd": "hello"})
 assert hello["name"] == "TiZi SmartSim"
 assert hello["varCount"] >= 5
 
+request({"cmd": "setTraceVariables", "names": ["main.CU", "main.COUNT"]})
+trace = request({"cmd": "traceData"})
+assert [item["name"] for item in trace["vars"]] == ["main.CU", "main.COUNT"]
+
 request({"cmd": "init"})
 request({"cmd": "writeVar", "name": "main.CU", "value": False})
 request({"cmd": "writeVar", "name": "main.R", "value": False})

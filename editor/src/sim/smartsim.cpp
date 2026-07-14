@@ -1,8 +1,12 @@
 #include "smartsim.h"
 
+#include "simdebugsession.h"
+
 #include "../core/compiler/StGenerator.h"
 #include "../core/models/ProjectModel.h"
 
+#include <QAbstractItemView>
+#include <QColor>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -11,14 +15,20 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
+#include <QMetaType>
 #include <QProgressBar>
 #include <QProcess>
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -95,6 +105,30 @@ SmartSimWidget::SmartSimWidget(ProjectModel* project, QWidget* parent)
     m_pollTimer = new QTimer(this);
     m_pollTimer->setInterval(250);
     connect(m_pollTimer, &QTimer::timeout, this, &SmartSimWidget::requestVariables);
+
+    m_debugSession = new SimDebugSession(this);
+    connect(m_debugSession, &SimDebugSession::commandReady,
+            this, &SmartSimWidget::sendCommand);
+    connect(m_debugSession, &SimDebugSession::runtimeHello, this,
+            [this](const QString& name, int, int) {
+        appendLog(name + " connected.");
+    });
+    connect(m_debugSession, &SimDebugSession::runtimeError, this,
+            [this](const QString& message) {
+        appendLog("runtime error: " + message);
+    });
+    connect(m_debugSession, &SimDebugSession::statusUpdated, this,
+            [this](bool running, quint64 tick, int scanTimeUs, int intervalMs) {
+        m_tick = tick;
+        m_scanTimeUs = scanTimeUs;
+        m_cycleMs = intervalMs;
+        m_state = running ? RunState::Running : m_state;
+        updateStatusLabels();
+    });
+    connect(m_debugSession, &SimDebugSession::valuesUpdated,
+            this, &SmartSimWidget::handleRuntimeVariables);
+    connect(m_debugSession, &SimDebugSession::stopped, this,
+            [this] { setRunState(RunState::Stopped); });
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(16, 16, 16, 16);
@@ -294,7 +328,7 @@ QWidget* SmartSimWidget::createAnalogPanel(const QString& title, bool output)
 QWidget* SmartSimWidget::createLogPanel()
 {
     auto* frame = new QFrame;
-    frame->setMinimumWidth(260);
+    frame->setMinimumWidth(360);
     frame->setStyleSheet(
         "QFrame {"
         "  background: #f7f9fb;"
@@ -306,8 +340,49 @@ QWidget* SmartSimWidget::createLogPanel()
     layout->setContentsMargins(12, 12, 12, 12);
     layout->setSpacing(8);
 
-    auto* title = new QLabel("Simulation Events");
-    title->setStyleSheet("font-weight: 700; color: #25313f;");
+    auto* watchTitle = new QLabel("Debug Watch");
+    watchTitle->setStyleSheet("font-weight: 700; color: #25313f;");
+
+    m_watchTable = new QTableWidget(0, 4, frame);
+    m_watchTable->setHorizontalHeaderLabels(QStringList() << "Name" << "Type" << "Value" << "Forced");
+    m_watchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_watchTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_watchTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_watchTable->setAlternatingRowColors(true);
+    m_watchTable->verticalHeader()->setVisible(false);
+    m_watchTable->verticalHeader()->setDefaultSectionSize(24);
+    m_watchTable->horizontalHeader()->setStretchLastSection(false);
+    m_watchTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_watchTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_watchTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_watchTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_watchTable->setStyleSheet(
+        "QTableWidget {"
+        "  background: #ffffff;"
+        "  border: 1px solid #cbd3dd;"
+        "  gridline-color: #e0e6ee;"
+        "}"
+        "QHeaderView::section {"
+        "  background: #e9eef4;"
+        "  border: 0;"
+        "  border-right: 1px solid #cbd3dd;"
+        "  padding: 4px 6px;"
+        "  font-weight: 700;"
+        "}");
+
+    auto* watchActions = new QHBoxLayout;
+    auto* forceButton = new QPushButton("Force");
+    auto* releaseButton = new QPushButton("Release");
+    connect(forceButton, &QPushButton::clicked,
+            this, &SmartSimWidget::forceSelectedVariable);
+    connect(releaseButton, &QPushButton::clicked,
+            this, &SmartSimWidget::releaseSelectedVariable);
+    watchActions->addWidget(forceButton);
+    watchActions->addWidget(releaseButton);
+    watchActions->addStretch(1);
+
+    auto* logTitle = new QLabel("Simulation Events");
+    logTitle->setStyleSheet("font-weight: 700; color: #25313f;");
     m_logText = new QLabel;
     m_logText->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     m_logText->setWordWrap(true);
@@ -321,7 +396,10 @@ QWidget* SmartSimWidget::createLogPanel()
         "  font-family: monospace;"
         "}");
 
-    layout->addWidget(title);
+    layout->addWidget(watchTitle);
+    layout->addWidget(m_watchTable, 2);
+    layout->addLayout(watchActions);
+    layout->addWidget(logTitle);
     layout->addWidget(m_logText, 1);
     return frame;
 }
@@ -582,8 +660,7 @@ void SmartSimWidget::requestVariables()
 {
     if (!m_process || m_process->state() != QProcess::Running)
         return;
-    sendCommand(QJsonObject{{"cmd", "status"}});
-    sendCommand(QJsonObject{{"cmd", "readVars"}});
+    m_debugSession->requestStatusAndValues();
 }
 
 void SmartSimWidget::handleRuntimeLine(const QByteArray& line)
@@ -598,46 +675,23 @@ void SmartSimWidget::handleRuntimeLine(const QByteArray& line)
         return;
     }
 
-    const QJsonObject obj = doc.object();
-    if (!obj.value("ok").toBool(false)) {
-        appendLog("runtime error: " + obj.value("error").toString("unknown"));
-        return;
-    }
-
-    if (obj.contains("name"))
-        appendLog(obj.value("name").toString("SmartSim") + " connected.");
-
-    if (obj.contains("tick"))
-        m_tick = static_cast<quint64>(obj.value("tick").toDouble());
-    if (obj.contains("scanTimeUs"))
-        m_scanTimeUs = obj.value("scanTimeUs").toInt();
-    if (obj.contains("intervalMs"))
-        m_cycleMs = obj.value("intervalMs").toInt(m_cycleMs);
-    if (obj.contains("running"))
-        m_state = obj.value("running").toBool() ? RunState::Running : m_state;
-    if (obj.contains("vars"))
-        handleRuntimeVariables(obj.value("vars").toArray());
-    if (obj.value("stopped").toBool(false))
-        setRunState(RunState::Stopped);
-
-    updateStatusLabels();
+    m_debugSession->handleRuntimeReply(doc.object());
 }
 
-void SmartSimWidget::handleRuntimeVariables(const QJsonArray& vars)
+void SmartSimWidget::handleRuntimeVariables(const QVector<SimDebugValue>& vars)
 {
     int di = 0;
     int dout = 0;
     int ai = 0;
     int ao = 0;
 
-    for (const QJsonValue& value : vars) {
-        const QJsonObject var = value.toObject();
-        const QString name = var.value("name").toString();
-        const QString type = var.value("type").toString();
+    for (const SimDebugValue& var : vars) {
+        const QString name = var.name;
+        const QString type = var.type;
         const QString lower = name.toLower();
 
         if (type == "BOOL") {
-            const bool on = var.value("value").toBool();
+            const bool on = var.value.toBool();
             const bool isOutput = lower.contains(".q") || lower.contains("do")
                 || lower.contains("out") || lower.contains("done");
             QList<QLabel*>& leds = isOutput ? m_doLeds : m_diLeds;
@@ -651,7 +705,7 @@ void SmartSimWidget::handleRuntimeVariables(const QJsonArray& vars)
         if (!isAnalogType)
             continue;
 
-        double raw = var.value("value").toDouble();
+        double raw = var.value.toDouble();
         int scaled = 0;
         if (raw >= 0.0 && raw <= 10.0)
             scaled = static_cast<int>(raw * 1000.0);
@@ -674,6 +728,116 @@ void SmartSimWidget::handleRuntimeVariables(const QJsonArray& vars)
         m_aiBars[ai]->setValue(0);
     for (; ao < m_aoBars.size(); ++ao)
         m_aoBars[ao]->setValue(0);
+
+    updateWatchTable(vars);
+}
+
+void SmartSimWidget::updateWatchTable(const QVector<SimDebugValue>& vars)
+{
+    if (!m_watchTable)
+        return;
+
+    const QString selected = selectedWatchVariable();
+    m_watchTable->setRowCount(vars.size());
+
+    int row = 0;
+    int selectedRow = -1;
+    for (const SimDebugValue& var : vars) {
+        auto* nameItem = new QTableWidgetItem(var.name);
+        auto* typeItem = new QTableWidgetItem(var.type);
+        auto* valueItem = new QTableWidgetItem(valueText(var.value));
+        auto* forcedItem = new QTableWidgetItem(var.forced ? "Yes" : "No");
+
+        QList<QTableWidgetItem*> items{nameItem, typeItem, valueItem, forcedItem};
+        for (QTableWidgetItem* item : items) {
+            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            item->setToolTip(item->text());
+            if (var.forced)
+                item->setBackground(QColor("#fff4bf"));
+        }
+        typeItem->setTextAlignment(Qt::AlignCenter);
+        valueItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        forcedItem->setTextAlignment(Qt::AlignCenter);
+
+        m_watchTable->setItem(row, 0, nameItem);
+        m_watchTable->setItem(row, 1, typeItem);
+        m_watchTable->setItem(row, 2, valueItem);
+        m_watchTable->setItem(row, 3, forcedItem);
+
+        if (var.name == selected)
+            selectedRow = row;
+        ++row;
+    }
+
+    if (selectedRow >= 0)
+        m_watchTable->selectRow(selectedRow);
+    else if (m_watchTable->rowCount() > 0 && m_watchTable->currentRow() < 0)
+        m_watchTable->selectRow(0);
+}
+
+QString SmartSimWidget::selectedWatchVariable() const
+{
+    if (!m_watchTable)
+        return QString();
+
+    const int row = m_watchTable->currentRow();
+    if (row < 0)
+        return QString();
+
+    QTableWidgetItem* item = m_watchTable->item(row, 0);
+    return item ? item->text() : QString();
+}
+
+void SmartSimWidget::forceSelectedVariable()
+{
+    if (!m_debugSession || !m_watchTable)
+        return;
+
+    const int row = m_watchTable->currentRow();
+    if (row < 0)
+        return;
+
+    QTableWidgetItem* nameItem = m_watchTable->item(row, 0);
+    QTableWidgetItem* typeItem = m_watchTable->item(row, 1);
+    QTableWidgetItem* valueItem = m_watchTable->item(row, 2);
+    if (!nameItem || !typeItem || !valueItem)
+        return;
+
+    bool accepted = false;
+    const QString text = QInputDialog::getText(
+        this,
+        "Force Variable",
+        QString("Force %1 (%2)").arg(nameItem->text(), typeItem->text()),
+        QLineEdit::Normal,
+        valueItem->text(),
+        &accepted);
+    if (!accepted)
+        return;
+
+    bool parsed = false;
+    const QVariant value = parseForceValue(typeItem->text(), text, &parsed);
+    if (!parsed) {
+        appendLog(QString("invalid force value for %1.").arg(nameItem->text()));
+        return;
+    }
+
+    m_debugSession->forceVariable(nameItem->text(), value);
+    appendLog(QString("forced %1 = %2.").arg(nameItem->text(), valueText(value)));
+    requestVariables();
+}
+
+void SmartSimWidget::releaseSelectedVariable()
+{
+    if (!m_debugSession)
+        return;
+
+    const QString name = selectedWatchVariable();
+    if (name.isEmpty())
+        return;
+
+    m_debugSession->releaseVariable(name);
+    appendLog(QString("released force on %1.").arg(name));
+    requestVariables();
 }
 
 void SmartSimWidget::stopRuntime()
@@ -775,4 +939,49 @@ QString SmartSimWidget::stateText(RunState state)
     case RunState::Paused: return "Paused";
     }
     return "Unknown";
+}
+
+QString SmartSimWidget::valueText(const QVariant& value)
+{
+    if (value.metaType().id() == QMetaType::Bool)
+        return value.toBool() ? "true" : "false";
+    if (value.canConvert<double>())
+        return QString::number(value.toDouble(), 'g', 9);
+    return value.toString();
+}
+
+QVariant SmartSimWidget::parseForceValue(const QString& type, const QString& text, bool* ok)
+{
+    if (ok)
+        *ok = false;
+
+    const QString normalizedType = type.trimmed().toUpper();
+    const QString normalizedText = text.trimmed().toLower();
+    if (normalizedType == "BOOL") {
+        if (normalizedText == "true" || normalizedText == "1" || normalizedText == "on") {
+            if (ok)
+                *ok = true;
+            return true;
+        }
+        if (normalizedText == "false" || normalizedText == "0" || normalizedText == "off") {
+            if (ok)
+                *ok = true;
+            return false;
+        }
+        return {};
+    }
+
+    if (normalizedType == "INT" || normalizedType == "DINT") {
+        bool converted = false;
+        const qlonglong value = text.trimmed().toLongLong(&converted);
+        if (ok)
+            *ok = converted;
+        return converted ? QVariant(value) : QVariant();
+    }
+
+    bool converted = false;
+    const double value = text.trimmed().toDouble(&converted);
+    if (ok)
+        *ok = converted;
+    return converted ? QVariant(value) : QVariant();
 }

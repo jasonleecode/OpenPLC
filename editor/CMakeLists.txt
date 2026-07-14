@@ -73,6 +73,8 @@ set(PROJECT_SOURCES
     src/core/compiler/CodeGenerator.cpp
     src/core/compiler/StGenerator.h
     src/core/compiler/StGenerator.cpp
+    src/sim/simdebugsession.h
+    src/sim/simdebugsession.cpp
     src/sim/smartsim.h
     src/sim/smartsim.cpp
 
