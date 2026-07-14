@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TiZiProject name="NativeLD" version="1" targetType="Linux" mode="NCC">
+  <pou name="main" type="program" language="LD">
+    <description>Native LD compiler smoke test</description>
+    <variables>
+      <var name="A" class="Local" type="BOOL" init="" comment=""/>
+      <var name="B" class="Local" type="BOOL" init="" comment=""/>
+      <var name="Y" class="Local" type="BOOL" init="" comment=""/>
+    </variables>
+    <graphical><![CDATA[LD
+<LD>
+  <leftPowerRail localId="1">
+    <connectionPointOut/>
+  </leftPowerRail>
+  <contact localId="2" negated="false" edge="none">
+    <variable>A</variable>
+    <connectionPointIn>
+      <connection refLocalId="1"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </contact>
+  <contact localId="3" negated="false" edge="rising">
+    <variable>B</variable>
+    <connectionPointIn>
+      <connection refLocalId="2"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </contact>
+  <coil localId="4" negated="false" storage="set">
+    <variable>Y</variable>
+    <connectionPointIn>
+      <connection refLocalId="3"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </coil>
+</LD>]]></graphical>
+  </pou>
+</TiZiProject>

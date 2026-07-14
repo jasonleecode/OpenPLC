@@ -1,210 +1,175 @@
-# Editor 梯形图编译与下载链路检查
+# Editor 梯形图编译与下载链路状态
 
 检查范围：`editor/` 中从梯形图项目保存、ST 生成、matiec 编译、driver 编译、产物生成，到 `DownloadDialog` 下载到 Runtime B 区的流程。
 
-## 结论
+## 当前状态
 
-当前链路存在多处实质问题。PLCopen/Beremiz 格式样例在部分环境下可能继续往后走，但 Editor 新建的原生 `.tizi` 梯形图项目、常见 LD 串联逻辑、XCODE 下载、以及编译后直接下载体验都存在断点。
-
-## 主要问题
-
-### 1. 新建/原生 `.tizi` 项目无法进入 ST 生成
-
-位置：
-
-- `editor/src/core/models/ProjectModel.cpp:88`
-- `editor/src/core/models/ProjectModel.cpp:95`
-- `editor/src/core/compiler/StGenerator.cpp:694`
-
-`ProjectModel::saveToFile()` 对非 PLCopen 来源项目调用 `saveTiZiNative()`，保存根节点为 `<TiZiProject>`。但 `StGenerator::fromXml()` 只接受 PLCopen 根节点 `<project>`，否则直接返回 `Root element is not <project>`。
-
-影响：
-
-- 用户在 Editor 中新建梯形图项目并保存后，`Build` 会在第 1 步失败。
-- 只有打开已有 PLCopen/Beremiz 风格文件时，才可能进入后续编译。
-
-建议：
-
-- 要么让 Build 阶段直接从 `ProjectModel` 生成 IEC ST，不再重新读取文件交给只支持 PLCopen 的 `StGenerator`。
-- 要么给原生 `.tizi` 增加转换到 PLCopen/ST 的路径。
-- 更彻底的做法是统一内部保存格式和编译输入格式，避免保存格式决定能否编译。
-
-### 2. LD 串联触点生成未声明临时变量
-
-位置：
-
-- `editor/src/core/compiler/StGenerator.cpp:343`
-- `editor/src/core/compiler/StGenerator.cpp:355`
-
-LD/FBD 转 ST 时，串联触点会生成类似：
-
-```iecst
-_t1 := (A) AND B;
-```
-
-但 `_t1` 没有被加入 POU 的 `VAR ... END_VAR` 声明块。
-
-影响：
-
-- 两个或多个触点串联是最常见的梯形图结构，会导致 matiec 报未声明变量。
-
-建议：
-
-- 在 `fbdToSt()` 收集临时变量列表，并在 `convertPou()` 的变量声明区补充 `VAR _t1 : BOOL; ... END_VAR`。
-- 或者尽量以内联表达式生成，避免产生需要声明的临时变量。
-
-### 3. LD 边沿触点和置位/复位线圈语义丢失
-
-位置：
-
-- `editor/src/editor/scene/PlcOpenViewer.cpp:1403`
-- `editor/src/editor/scene/PlcOpenViewer.cpp:1420`
-- `editor/src/core/compiler/StGenerator.cpp:171`
-- `editor/src/core/compiler/StGenerator.cpp:179`
-
-`PlcOpenViewer::buildBodyFromScene()` 会保存：
-
-- contact 的 `edge="rising"` / `edge="falling"`
-- coil 的 `storage="set"` / `storage="reset"`
-
-但 `StGenerator::parseFbd()` 只读取 `negated`，没有读取 `edge` 或 `storage`。生成 ST 时也只做普通触点和普通赋值线圈。
-
-影响：
-
-- 上升沿/下降沿触点会被当成普通触点。
-- Set/Reset 线圈会被当成普通输出线圈。
-- 编译可能成功，但运行行为不符合梯形图语义。
-
-建议：
-
-- 在 `Elem` 中增加 contact edge 和 coil storage 字段。
-- 对边沿触点生成需要状态记忆的 ST 逻辑，或者映射到标准边沿功能块。
-- 对 Set/Reset 线圈生成条件赋值：
-
-```iecst
-IF rung THEN
-  Y := TRUE;
-END_IF;
-```
-
-或 reset 对应 `FALSE`。
-
-### 4. Build 成功产物没有传给下载窗口
-
-位置：
-
-- `editor/src/app/MainWindow.cpp:2095`
-- `editor/src/app/MainWindow.cpp:2134`
-- `editor/src/app/MainWindow.cpp:2144`
-- `editor/src/comm/DownloadDialog.cpp:33`
-
-`buildProject()` 计算了 `finalOutput` 并打印成功信息，但没有保存到 `MainWindow` 成员变量。`downloadProject()` 只是创建空的 `DownloadDialog`。虽然 `DownloadDialog::setBinaryPath()` 已存在，但没有被调用。
-
-影响：
-
-- 用户点击 Download 后需要手工 Browse。
-- 容易选错旧文件、`.elf`、裸 `.wasm` 或其他非下载产物。
-
-建议：
-
-- 在 `MainWindow` 增加 `m_lastBuildOutput`。
-- Build 成功后保存最终可下载文件路径。
-- `downloadProject()` 中调用 `dlg.setBinaryPath(m_lastBuildOutput)`。
-- 如果没有成功构建产物，提示先 Build。
-
-### 5. XCODE 模式输出裸 `.wasm`，Runtime 需要带头部的 B 区镜像
-
-位置：
-
-- `editor/src/app/MainWindow.cpp:1886`
-- `editor/src/app/MainWindow.cpp:1917`
-- `editor/src/comm/PlcProtocol.cpp:58`
-- `runtime/app/xcode_runner.c:63`
-
-Runtime XCODE 模式期望 Flash B 起始布局：
+已完成第一轮修复，并提交为：
 
 ```text
-[4 bytes XCODE_WASM_MAGIC][4 bytes wasm_size][wasm bytes]
+972fdf2 Fix editor ladder build and download pipeline
 ```
 
-但 Editor XCODE 编译只生成裸 `.wasm`，下载协议也只是原样写入用户选择的文件内容。
+修复后，以下链路已经过验证：
 
-影响：
+- PLCopen/Beremiz `.tizi` 示例：`StGenerator -> iec2iec -> iec2c`
+- TiZi 原生 `<TiZiProject>` 最小 LD 示例：`StGenerator -> iec2iec -> iec2c`
+- TiZi 原生 LD 示例继续通过 Linux driver wrapper 编译为本机可执行文件
+- Qt Editor 目标：`cmake --build editor/build --target TiZi --parallel 2`
 
-- XCODE 下载后，Runtime 会检查 B 区头部魔数失败，认为没有合法 WASM。
+可重复验证脚本：
 
-建议：
-
-- XCODE Build 后生成可下载镜像文件，例如 `plc_program.xcode.bin`。
-- 文件内容为小端 `XCODE_WASM_MAGIC`、小端 wasm size、裸 wasm bytes。
-- 下载窗口应默认选择这个镜像，而不是裸 `.wasm`。
-
-### 6. 当前 Linux 工作区无法执行仓库内 matiec 工具
-
-位置：
-
-- `editor/CMakeLists.txt:122`
-- `editor/tools/matiec_mac/iec2iec`
-- `editor/tools/matiec_mac/iec2c`
-
-CMake 固定：
-
-```cmake
-MATIEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/matiec_mac"
+```bash
+editor/tests/verify_build_pipeline.sh
 ```
 
-但当前仓库内 `iec2iec` / `iec2c` 是 macOS arm64 Mach-O 可执行文件。
+默认使用：
 
-影响：
-
-- 在 Linux 上，Editor 会“找到”工具文件，但执行会失败。
-
-建议：
-
-- 按平台选择 `matiec_linux` / `matiec_mac`。
-- 或者让 `MATIEC_DIR` 成为 CMake cache 变量，由用户配置。
-- Build 前检查工具是否可执行且平台匹配，失败时给明确错误。
-
-### 7. LPC824 B 区 16KB 限制只显示，不阻止
-
-位置：
-
-- `editor/tests/drivers/lpc824/driver.json:46`
-- `editor/src/app/MainWindow.cpp:2124`
-- `editor/src/comm/PlcProtocol.cpp:62`
-
-driver 中配置了：
-
-```json
-"max_size_bytes": 16384
+```text
+QT_ROOT=$HOME/Qt/6.5.3/gcc_64
+editor/tools/matiec_linux
 ```
 
-Build 只打印大小，没有在超过限制时失败。`PlcProtocol::downloadBinary()` 会按 256 字节分页继续下载，直到 Runtime 端因为越过 B 区返回 NAK。
+如果 Qt 安装路径不同，可用：
 
-影响：
+```bash
+QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
+```
 
-- 超限错误会延迟到下载中途出现。
-- 用户无法在构建阶段得到明确反馈。
+## 已修复
 
-建议：
+### 1. 原生 `.tizi` 编译入口
 
-- post-build 后检查 `binFile` size。
-- 若超过 `max_size_bytes`，Build 失败并禁止更新 `m_lastBuildOutput`。
+原问题：`ProjectModel::saveTiZiNative()` 保存 `<TiZiProject>`，但 `StGenerator::fromXml()` 只接受 PLCopen `<project>`。
 
-## 优先修复顺序
+当前状态：
 
-1. 修复原生 `.tizi` 到 ST/PLCopen 的编译输入路径。
-2. 修复 LD 临时变量声明，否则常见串联触点无法编译。
-3. 修复 LD edge/storage 语义，否则编译成功也可能运行错误。
-4. 保存 Build 最终产物路径并传给 `DownloadDialog`。
-5. XCODE 生成带头部的下载镜像。
-6. 平台化 matiec 工具路径。
-7. 构建阶段强制检查 B 区大小限制。
+- `StGenerator` 已支持 `<TiZiProject>`。
+- 原生项目会按 POU、变量、`graphical`/`code` 内容生成 IEC ST。
+- 若存在 Program POU，会生成最小默认 `CONFIGURATION`。
 
-## 备注
+### 2. LD 串联触点临时变量
 
-本次只做静态检查和轻量环境确认，没有修改业务代码。当前工作区中已有一个非本次产生的修改：
+原问题：串联触点生成 `_t1 := ...`，但没有声明 `_t1`。
+
+当前状态：
+
+- LD/FBD 转 ST 时会收集布尔临时变量。
+- 生成 `TIZI_TMP* : BOOL;` 声明。
+- 最小原生 LD fixture 已覆盖该路径。
+
+### 3. LD 边沿触点与 Set/Reset 线圈
+
+原问题：`PlcOpenViewer` 保存 `edge`/`storage`，但 `StGenerator` 忽略。
+
+当前状态：
+
+- contact `edge="rising"` / `edge="falling"` 会生成带状态记忆的脉冲逻辑。
+- coil `storage="set"` / `storage="reset"` 会生成条件置位/复位。
+- 相关状态变量会声明为 `TIZI_EDGE* : BOOL;`。
+
+### 4. Build 产物与下载窗口衔接
+
+原问题：Build 成功只打印产物路径，`DownloadDialog` 不知道最近一次产物。
+
+当前状态：
+
+- `MainWindow` 保存 `m_lastBuildOutput`。
+- NCC post-build 后保存最终 `.bin` 或可执行产物路径。
+- XCODE build 后保存 `.xcode.bin` 路径。
+- `downloadProject()` 会预填最近一次构建产物。
+
+### 5. XCODE 下载镜像头
+
+原问题：Runtime XCODE 需要 `[magic][wasm_size][wasm]`，Editor 只输出裸 `.wasm`。
+
+当前状态：
+
+- XCODE build 会生成 `*.xcode.bin`。
+- 文件头使用小端 `XCODE_WASM_MAGIC = 0x57415300` 和 wasm size。
+- 下载窗口默认选择该镜像，而不是裸 `.wasm`。
+
+### 6. Linux matiec 工具路径
+
+原问题：Linux 上 CMake 仍默认 `tools/matiec_mac`。
+
+当前状态：
+
+- CMake 按平台选择 `tools/matiec_linux` 或 `tools/matiec_mac`。
+- Runtime 查找时要求 `iec2iec` 和 `iec2c` 都存在且可执行。
+- 当前仓库已包含 `editor/tools/matiec_linux`。
+
+### 7. B 区大小限制
+
+原问题：LPC824 `max_size_bytes` 只显示，不阻止。
+
+当前状态：
+
+- NCC post-build 后会检查 `max_size_bytes`。
+- 超限会 Build 失败，不再继续暴露为可下载产物。
+- XCODE 镜像会按 driver `memory_map.user_flash_size_kb` 检查大小。
+
+## 剩余风险
+
+### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
+
+当前 `StGenerator` 已覆盖基础路径，但仍不是完整 PLCopen 图形语言编译器。需要继续测试：
+
+- 并联分支
+- 多输出线圈
+- 多个 `connectionPointIn` / `connectionPointOut`
+- block 多输出端口和 `formalParameter`
+- 反馈回路
+- `inOutVariable` 复杂引用
+
+### 2. 边沿触点语义需要硬件/周期级确认
+
+当前边沿逻辑按每次 POU 扫描更新 `TIZI_EDGE*`。这通过 matiec 语法和 C 生成验证，但还需要在真实扫描周期中确认与预期 PLC 行为一致。
+
+### 3. XCODE 未做完整运行验证
+
+已修复下载镜像格式，但还没有验证：
+
+- WASI-SDK 实际编译
+- `.xcode.bin` 下载到 Runtime B 区
+- WAMR 加载镜像
+- `plc_init()` / `plc_run(ms)` 实际调用
+
+### 4. DownloadDialog 仍允许手动选错文件
+
+Build 后会预填正确产物，但用户仍可 Browse 任意文件。建议后续下载前做模式相关校验：
+
+- NCC: 检查 `USER_LOGIC_MAGIC`
+- XCODE: 检查 `XCODE_WASM_MAGIC`
+- 检查文件大小不超过 B 区
+
+### 5. Linux matiec 二进制直接入库
+
+当前方案能工作，但二进制入库会带来仓库体积和平台兼容风险。可选后续方案：
+
+- 保留当前二进制，作为开发便利工具。
+- 增加构建脚本，从 matiec 源码构建本机工具。
+- 在 CI 中验证工具可执行。
+
+### 6. 非 LD 图形编辑器仍有占位
+
+Editor 中仍有部分功能是占位或未实现：
+
+- Variable Browser
+- License Editor
+- Ethernet Runtime server side
+- 部分非 LD 图形编辑 “coming soon”
+
+这些不阻断当前 LD 编译下载链路，但影响产品完整性。
+
+## 未提交的样例文件
+
+当前工作区仍有一个用户已有修改：
 
 ```text
 M editor/tests/first_steps/plcc.tizi
 ```
+
+观察到的差异主要是 XML 属性顺序/格式被 Qt DOM 重写，新增 `TiZiBuild`，以及一处 `CounterLD` 中 block 位置从 `y="87"` 变为 `y="90"`。
+
+建议单独确认该文件是否应作为样例更新提交；不要混入编译链路修复提交。
