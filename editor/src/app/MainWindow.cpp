@@ -27,6 +27,7 @@
 #include <QTableWidgetItem>
 #include <QHeaderView>
 #include <QAbstractItemView>
+#include <QStyledItemDelegate>
 #include <QLabel>
 #include <QLineEdit>
 #include <QComboBox>
@@ -54,6 +55,8 @@
 #include <QDrag>
 #include <QMimeData>
 
+#include <utility>
+
 #include "../editor/scene/LadderScene.h"
 #include "../editor/scene/LadderView.h"
 #include "../editor/scene/PlcOpenViewer.h"
@@ -66,6 +69,54 @@
 #include "../comm/DownloadDialog.h"
 
 // PlcOpenViewer 兼作所有图形语言（LD/FBD/SFC）的统一编辑器
+
+// ============================================================
+namespace {
+class ComboBoxDelegate final : public QStyledItemDelegate {
+public:
+    explicit ComboBoxDelegate(QStringList values, QObject* parent = nullptr)
+        : QStyledItemDelegate(parent)
+        , m_values(std::move(values))
+    {}
+
+    QWidget* createEditor(QWidget* parent,
+                          const QStyleOptionViewItem&,
+                          const QModelIndex&) const override
+    {
+        auto* combo = new QComboBox(parent);
+        combo->addItems(m_values);
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        combo->setMinimumContentsLength(1);
+        return combo;
+    }
+
+    void setEditorData(QWidget* editor, const QModelIndex& index) const override
+    {
+        auto* combo = qobject_cast<QComboBox*>(editor);
+        if (!combo)
+            return;
+
+        const QString current = index.data(Qt::EditRole).toString();
+        if (!current.isEmpty() && combo->findText(current) < 0)
+            combo->addItem(current);
+        combo->setCurrentText(current);
+    }
+
+    void setModelData(QWidget* editor,
+                      QAbstractItemModel* model,
+                      const QModelIndex& index) const override
+    {
+        auto* combo = qobject_cast<QComboBox*>(editor);
+        if (!combo)
+            return;
+
+        model->setData(index, combo->currentText(), Qt::EditRole);
+    }
+
+private:
+    QStringList m_values;
+};
+}
 
 // ============================================================
 // ============================================================
@@ -1288,7 +1339,10 @@ void MainWindow::closeAllPouTabs()
 
     m_subWinPouMap.clear();
     m_projPropSubWin = nullptr;
-    m_smartSimSubWin = nullptr;
+    if (m_smartSimWindow) {
+        m_smartSimWindow->close();
+        m_smartSimWindow = nullptr;
+    }
     m_scene = nullptr;
     m_mdiArea->closeAllSubWindows();
 }
@@ -1310,22 +1364,25 @@ void MainWindow::openSmartSim()
     ProjectManager::syncScenesBeforeSave(m_sceneMap);
     m_project->saveToFile(m_project->filePath);
 
-    if (m_smartSimSubWin) {
-        m_mdiArea->setActiveSubWindow(m_smartSimSubWin);
+    if (m_smartSimWindow) {
+        m_smartSimWindow->show();
+        m_smartSimWindow->raise();
+        m_smartSimWindow->activateWindow();
         return;
     }
 
-    auto* panel = new SmartSimWidget(m_project);
-    m_smartSimSubWin = m_mdiArea->addSubWindow(panel);
-    m_smartSimSubWin->setAttribute(Qt::WA_DeleteOnClose);
-    m_smartSimSubWin->setWindowTitle("SmartSim - PC PLC Simulation");
+    m_smartSimWindow = new SmartSimWidget(m_project);
+    m_smartSimWindow->setAttribute(Qt::WA_DeleteOnClose);
+    m_smartSimWindow->setWindowTitle("SmartSim - PC PLC Simulation");
+    m_smartSimWindow->resize(1180, 720);
 
-    connect(m_smartSimSubWin, &QObject::destroyed, this, [this] {
-        m_smartSimSubWin = nullptr;
+    connect(m_smartSimWindow, &QObject::destroyed, this, [this] {
+        m_smartSimWindow = nullptr;
     });
 
-    m_smartSimSubWin->show();
-    m_mdiArea->setActiveSubWindow(m_smartSimSubWin);
+    m_smartSimWindow->show();
+    m_smartSimWindow->raise();
+    m_smartSimWindow->activateWindow();
 }
 
 // ============================================================
@@ -1681,12 +1738,24 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
     table->horizontalHeader()->setStretchLastSection(true);
     table->setAlternatingRowColors(true);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    table->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::SelectedClicked);
+    table->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     table->setColumnWidth(0, 32);
     table->setColumnWidth(1, 110);
-    table->setColumnWidth(2, 75);
-    table->setColumnWidth(3, 75);
+    table->setColumnWidth(2, 88);
+    table->setColumnWidth(3, 110);
     table->setColumnWidth(4, 100);
+
+    const QStringList varClasses = {"Input", "Output", "InOut", "Local", "External", "Global"};
+    const QStringList varTypes = {
+        "BOOL", "SINT", "INT", "DINT", "LINT",
+        "USINT", "UINT", "UDINT", "ULINT",
+        "REAL", "LREAL",
+        "TIME", "DATE", "TIME_OF_DAY", "TOD", "DATE_AND_TIME", "DT",
+        "STRING", "BYTE", "WORD", "DWORD", "LWORD"
+    };
+
+    table->setItemDelegateForColumn(2, new ComboBoxDelegate(varClasses, table));
+    table->setItemDelegateForColumn(3, new ComboBoxDelegate(varTypes, table));
 
     // —— 辅助：将 pou->variables[row] 的数据写入 table 第 row 行 ——
     auto fillRow = [table](int row, const VariableDecl& v) {
@@ -1696,7 +1765,7 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
         table->setItem(row, 3, new QTableWidgetItem(v.type));
         table->setItem(row, 4, new QTableWidgetItem(v.initValue));
         table->setItem(row, 5, new QTableWidgetItem(v.comment));
-        table->setRowHeight(row, 20);
+        table->setRowHeight(row, 24);
         // 第0列（序号）不可编辑
         if (auto* it = table->item(row, 0))
             it->setFlags(it->flags() & ~Qt::ItemIsEditable);

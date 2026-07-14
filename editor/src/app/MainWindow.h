@@ -133,8 +133,8 @@ private:
 
     // 项目属性面板（单例子窗口）
     QMdiSubWindow* m_projPropSubWin = nullptr;
-    // PC 仿真面板（单例子窗口）
-    QMdiSubWindow* m_smartSimSubWin = nullptr;
+    // PC 仿真面板（独立窗口，单例）
+    SmartSimWidget* m_smartSimWindow = nullptr;
 
     // 每个 MDI 子窗口对应的 PouModel
     QMap<QMdiSubWindow*, PouModel*> m_subWinPouMap;
