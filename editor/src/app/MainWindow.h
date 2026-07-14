@@ -148,6 +148,7 @@ private:
     QMetaObject::Connection m_undoConn;
     QMetaObject::Connection m_redoConn;
     QString  m_currentTheme;         // 当前主题 QRC 路径
+    QString  m_lastBuildOutput;      // 最近一次成功构建出的可下载产物
     QAction* m_aConnect  = nullptr;  // 连接/断开（图标随状态切换）
     QAction* m_aTransfer = nullptr;  // 下载程序
     QAction* m_aRun      = nullptr;

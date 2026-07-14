@@ -18,10 +18,16 @@ static QString g_lastError;
 // ───────────────────────────────────────────────────────────────────────────
 
 // 按本地名查找第一个子元素（忽略命名空间前缀）
+static QString elemName(const QDomElement& e)
+{
+    const QString local = e.localName();
+    return local.isEmpty() ? e.tagName() : local;
+}
+
 static QDomElement fc(const QDomElement& p, const QString& localName)
 {
     for (QDomElement c = p.firstChildElement(); !c.isNull(); c = c.nextSiblingElement())
-        if (c.localName() == localName) return c;
+        if (elemName(c) == localName) return c;
     return {};
 }
 
@@ -30,7 +36,7 @@ static QList<QDomElement> ch(const QDomElement& p, const QString& localName)
 {
     QList<QDomElement> r;
     for (QDomElement c = p.firstChildElement(); !c.isNull(); c = c.nextSiblingElement())
-        if (c.localName() == localName) r << c;
+        if (elemName(c) == localName) r << c;
     return r;
 }
 
@@ -38,7 +44,7 @@ static QList<QDomElement> ch(const QDomElement& p, const QString& localName)
 static QString cdata(const QDomElement& langEl)
 {
     for (QDomElement c = langEl.firstChildElement(); !c.isNull(); c = c.nextSiblingElement())
-        if (c.localName() == "p") return c.text();
+        if (elemName(c) == "p") return c.text();
     return {};
 }
 
@@ -48,12 +54,12 @@ static QString itype(const QDomElement& typeEl)
     if (typeEl.isNull()) return "ANY";
     QDomElement child = typeEl.firstChildElement();
     if (child.isNull()) return "ANY";
-    if (child.localName() == "derived") return child.attribute("name");
-    if (child.localName() == "array") {
+    if (elemName(child) == "derived") return child.attribute("name");
+    if (elemName(child) == "array") {
         QString base = itype(fc(child, "baseType"));
         return QString("ARRAY OF %1").arg(base);
     }
-    return child.localName(); // BOOL INT REAL DINT WORD TIME …
+    return elemName(child); // BOOL INT REAL DINT WORD TIME …
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -85,6 +91,15 @@ static void emitVarBlock(const QDomElement& varsEl,
     out << indent + "END_VAR";
 }
 
+static void emitBoolTemps(const QStringList& names, QStringList& out)
+{
+    if (names.isEmpty()) return;
+    out << "VAR";
+    for (const QString& name : names)
+        out << QString("  %1 : BOOL;").arg(name);
+    out << "END_VAR";
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // FBD/LD 图元连接结构
 // ───────────────────────────────────────────────────────────────────────────
@@ -105,6 +120,8 @@ struct Elem {
     QString instanceName;   // Block: 实例名（空 = 函数调用）
     QString expression;     // InVar/OutVar/InOutVar/Contact/Coil
     bool    negated = false;
+    QString edge;           // Contact: none/rising/falling
+    QString storage;        // Coil: none/set/reset
 
     QList<Conn>    inputs;
     QList<QString> outputPorts;
@@ -122,7 +139,7 @@ static QMap<int, Elem> parseFbd(const QDomElement& bodyEl)
     for (QDomElement e = bodyEl.firstChildElement();
          !e.isNull(); e = e.nextSiblingElement())
     {
-        const QString tag = e.localName();
+        const QString tag = elemName(e);
         Elem el;
         el.localId   = e.attribute("localId").toInt();
         el.execOrder = e.attribute("executionOrderId", "0").toInt();
@@ -172,6 +189,7 @@ static QMap<int, Elem> parseFbd(const QDomElement& bodyEl)
             el.kind       = Elem::Contact;
             el.expression = fc(e, "variable").text().trimmed();
             el.negated    = (e.attribute("negated") == "true");
+            el.edge       = e.attribute("edge", "none");
             QDomElement con = fc(fc(e, "connectionPointIn"), "connection");
             if (!con.isNull())
                 el.inputs << Conn{con.attribute("refLocalId").toInt(), {}, {}};
@@ -180,6 +198,7 @@ static QMap<int, Elem> parseFbd(const QDomElement& bodyEl)
             el.kind       = Elem::Coil;
             el.expression = fc(e, "variable").text().trimmed();
             el.negated    = (e.attribute("negated") == "true");
+            el.storage    = e.attribute("storage", "none");
             QDomElement con = fc(fc(e, "connectionPointIn"), "connection");
             if (!con.isNull())
                 el.inputs << Conn{con.attribute("refLocalId").toInt(), {}, {}};
@@ -281,10 +300,29 @@ static QList<int> topoSort(const QMap<int, Elem>& elems)
 // ───────────────────────────────────────────────────────────────────────────
 // FBD/LD → ST 代码生成
 // ───────────────────────────────────────────────────────────────────────────
-static QStringList fbdToSt(QMap<int, Elem>& elems)
-{
+struct FbdStResult {
     QStringList lines;
+    QStringList boolTemps;
+    QStringList edgeTemps;
+};
+
+static FbdStResult fbdToSt(QMap<int, Elem>& elems)
+{
+    FbdStResult result;
     int tmpN = 0;
+
+    auto newBoolTemp = [&]() -> QString {
+        QString name = QString("TIZI_TMP%1").arg(++tmpN);
+        result.boolTemps << name;
+        return name;
+    };
+
+    auto edgeTemp = [&](int localId) -> QString {
+        QString name = QString("TIZI_EDGE%1").arg(localId);
+        if (!result.edgeTemps.contains(name))
+            result.edgeTemps << name;
+        return name;
+    };
 
     // 预处理：统计每个图元输出端口被引用的次数
     // refId→port 的引用数；函数调用被多次引用时需要临时变量
@@ -335,7 +373,7 @@ static QStringList fbdToSt(QMap<int, Elem>& elems)
             if (!el.inputs.isEmpty() && el.inputs[0].refId >= 0) {
                 QString s = sig(el.inputs[0].refId, el.inputs[0].refPort);
                 if (!s.isEmpty() && s != el.expression)
-                    lines << QString("  %1 := %2;").arg(el.expression, s);
+                    result.lines << QString("  %1 := %2;").arg(el.expression, s);
             }
             break;
         }
@@ -344,17 +382,32 @@ static QStringList fbdToSt(QMap<int, Elem>& elems)
             QString in = el.inputs.isEmpty() ? "TRUE"
                        : sig(el.inputs[0].refId, el.inputs[0].refPort);
             if (in.isEmpty()) in = "TRUE";
-            QString varExpr = el.negated
-                        ? QString("NOT %1").arg(el.expression)
-                        : el.expression;
+            QString varExpr;
+            if (el.edge == "rising" || el.edge == "falling") {
+                const QString prev = edgeTemp(el.localId);
+                const QString rawPulse = (el.edge == "rising")
+                    ? QString("(%1 AND NOT %2)").arg(el.expression, prev)
+                    : QString("((NOT %1) AND %2)").arg(el.expression, prev);
+                QString pulse = rawPulse;
+                if (el.negated)
+                    pulse = QString("NOT %1").arg(rawPulse);
+                QString tmp = newBoolTemp();
+                result.lines << QString("  %1 := %2;").arg(tmp, pulse);
+                result.lines << QString("  %1 := %2;").arg(prev, el.expression);
+                varExpr = tmp;
+            } else {
+                varExpr = el.negated
+                            ? QString("NOT %1").arg(el.expression)
+                            : el.expression;
+            }
             if (in == "TRUE") {
                 // 直接使用变量表达式，无需临时变量
                 el.outSig[{}] = varExpr;
             } else {
                 // 串联逻辑：需要 AND 表达式
-                QString tmp = QString("_t%1").arg(++tmpN);
+                QString tmp = newBoolTemp();
                 el.outSig[{}] = tmp;
-                lines << QString("  %1 := (%2) AND %3;").arg(tmp, in, varExpr);
+                result.lines << QString("  %1 := (%2) AND %3;").arg(tmp, in, varExpr);
             }
             break;
         }
@@ -364,7 +417,17 @@ static QStringList fbdToSt(QMap<int, Elem>& elems)
                        : sig(el.inputs[0].refId, el.inputs[0].refPort);
             if (in.isEmpty()) in = "FALSE";
             QString val = el.negated ? QString("NOT (%1)").arg(in) : in;
-            lines << QString("  %1 := %2;").arg(el.expression, val);
+            if (el.storage == "set") {
+                result.lines << QString("  IF %1 THEN").arg(val);
+                result.lines << QString("    %1 := TRUE;").arg(el.expression);
+                result.lines << "  END_IF;";
+            } else if (el.storage == "reset") {
+                result.lines << QString("  IF %1 THEN").arg(val);
+                result.lines << QString("    %1 := FALSE;").arg(el.expression);
+                result.lines << "  END_IF;";
+            } else {
+                result.lines << QString("  %1 := %2;").arg(el.expression, val);
+            }
             break;
         }
 
@@ -387,16 +450,17 @@ static QStringList fbdToSt(QMap<int, Elem>& elems)
                 QString callExpr = QString("%1(%2)").arg(el.typeName, args.join(", "));
                 if (uses > 1) {
                     // 多次引用：需要临时变量
-                    QString tmp = QString("_t%1").arg(++tmpN);
-                    el.outSig[port] = tmp;
-                    lines << QString("  %1 := %2;").arg(tmp, callExpr);
+                    // Without type information for arbitrary function outputs,
+                    // repeated function references are inlined instead of using
+                    // an undeclared or incorrectly typed temporary.
+                    el.outSig[port] = callExpr;
                 } else {
                     // 单次引用：内联表达式（不生成赋值语句）
                     el.outSig[port] = callExpr;
                 }
             } else {
                 // 功能块调用（有状态，必须显式调用）
-                lines << QString("  %1(%2);")
+                result.lines << QString("  %1(%2);")
                          .arg(el.instanceName, args.join(", "));
                 for (const QString& p : el.outputPorts)
                     el.outSig[p] = el.instanceName + "." + p;
@@ -408,7 +472,7 @@ static QStringList fbdToSt(QMap<int, Elem>& elems)
             if (!el.inputs.isEmpty()) {
                 QString s = sig(el.inputs[0].refId, el.inputs[0].refPort);
                 if (s.isEmpty()) s = "FALSE";
-                lines << QString("  %1 := %2;").arg(el.expression, s);
+                result.lines << QString("  %1 := %2;").arg(el.expression, s);
             }
             break;
         }
@@ -417,7 +481,7 @@ static QStringList fbdToSt(QMap<int, Elem>& elems)
         }
     }
 
-    return lines;
+    return result;
 }
 // ───────────────────────────────────────────────────────────────────────────
 // SFC → matiec 原生 SFC 文本
@@ -438,7 +502,7 @@ static QStringList sfcToText(const QDomElement& sfcEl)
     for (QDomElement e = sfcEl.firstChildElement();
          !e.isNull(); e = e.nextSiblingElement())
     {
-        QString tag = e.localName();
+        QString tag = elemName(e);
         int id = e.attribute("localId").toInt();
 
         if (tag == "step") {
@@ -592,6 +656,16 @@ static QStringList convertPou(const QDomElement& pouEl)
     const QString pouType = pouEl.attribute("pouType");
 
     QDomElement iface = fc(pouEl, "interface");
+    QDomElement body = fc(pouEl, "body");
+
+    QDomElement fbdEl = fc(body, "FBD");
+    if (fbdEl.isNull()) fbdEl = fc(body, "LD");
+    FbdStResult fbdResult;
+    bool hasFbdBody = !fbdEl.isNull();
+    if (hasFbdBody) {
+        auto elems = parseFbd(fbdEl);
+        fbdResult = fbdToSt(elems);
+    }
 
     // ── 头部关键字 ────────────────────────────────────────
     QString keyword, endKeyword;
@@ -619,6 +693,11 @@ static QStringList convertPou(const QDomElement& pouEl)
                  "VAR_IN_OUT", false, out);
     emitVarBlock(fc(iface, "localVars"),
                  "VAR", false, out);
+    QStringList tempNames = fbdResult.boolTemps;
+    for (const QString& edgeName : fbdResult.edgeTemps)
+        if (!tempNames.contains(edgeName))
+            tempNames << edgeName;
+    emitBoolTemps(tempNames, out);
     {
         QDomElement ev = fc(iface, "externalVars");
         bool isConst = ev.attribute("constant") == "true";
@@ -626,8 +705,6 @@ static QStringList convertPou(const QDomElement& pouEl)
     }
 
     // ── 程序体 ────────────────────────────────────────────
-    QDomElement body = fc(pouEl, "body");
-
     // ST
     QDomElement stEl = fc(body, "ST");
     if (!stEl.isNull()) {
@@ -661,11 +738,8 @@ static QStringList convertPou(const QDomElement& pouEl)
     }
 
     // FBD / LD（统一处理）
-    QDomElement fbdEl = fc(body, "FBD");
-    if (fbdEl.isNull()) fbdEl = fc(body, "LD");
-    if (!fbdEl.isNull()) {
-        auto elems = parseFbd(fbdEl);
-        for (const QString& ln : fbdToSt(elems))
+    if (hasFbdBody) {
+        for (const QString& ln : fbdResult.lines)
             out << ln;
         out << endKeyword;
         out << "";
@@ -676,6 +750,146 @@ static QStringList convertPou(const QDomElement& pouEl)
     out << endKeyword;
     out << "";
     return out;
+}
+
+static void emitNativeVarBlock(const QList<QDomElement>& vars,
+                               const QString& keyword,
+                               QStringList& out)
+{
+    if (vars.isEmpty()) return;
+
+    out << keyword;
+    for (const QDomElement& v : vars) {
+        QString init;
+        if (!v.attribute("init").trimmed().isEmpty())
+            init = " := " + v.attribute("init").trimmed();
+        out << QString("  %1 : %2%3;")
+               .arg(v.attribute("name"),
+                    v.attribute("type", "BOOL"),
+                    init);
+    }
+    out << "END_VAR";
+}
+
+static QString nativePouType(const QString& value)
+{
+    const QString t = value.trimmed();
+    if (t.compare("function", Qt::CaseInsensitive) == 0) return "function";
+    if (t.compare("program", Qt::CaseInsensitive) == 0) return "program";
+    return "functionBlock";
+}
+
+static QStringList convertNativePou(const QDomElement& pouEl)
+{
+    QStringList out;
+    const QString name = pouEl.attribute("name");
+    const QString pouType = nativePouType(pouEl.attribute("type"));
+
+    QString keyword, endKeyword;
+    if (pouType == "function") {
+        keyword = QString("FUNCTION %1 : BOOL").arg(name);
+        endKeyword = "END_FUNCTION";
+    } else if (pouType == "program") {
+        keyword = QString("PROGRAM %1").arg(name);
+        endKeyword = "END_PROGRAM";
+    } else {
+        keyword = QString("FUNCTION_BLOCK %1").arg(name);
+        endKeyword = "END_FUNCTION_BLOCK";
+    }
+    out << keyword;
+
+    QList<QDomElement> inputVars, outputVars, inOutVars, localVars, externalVars;
+    QDomElement varsEl = pouEl.firstChildElement("variables");
+    for (QDomElement v = varsEl.firstChildElement("var");
+         !v.isNull(); v = v.nextSiblingElement("var"))
+    {
+        const QString cls = v.attribute("class").trimmed();
+        if (cls.compare("Input", Qt::CaseInsensitive) == 0) inputVars << v;
+        else if (cls.compare("Output", Qt::CaseInsensitive) == 0) outputVars << v;
+        else if (cls.compare("InOut", Qt::CaseInsensitive) == 0) inOutVars << v;
+        else if (cls.compare("External", Qt::CaseInsensitive) == 0) externalVars << v;
+        else localVars << v;
+    }
+
+    QDomElement graphEl = pouEl.firstChildElement("graphical");
+    FbdStResult fbdResult;
+    bool hasGraphBody = false;
+    if (!graphEl.isNull()) {
+        QString graph = graphEl.text();
+        int nl = graph.indexOf('\n');
+        QString bodyXml = (nl >= 0) ? graph.mid(nl + 1) : graph;
+        QDomDocument bodyDoc;
+        if (bodyDoc.setContent(bodyXml)) {
+            QDomElement body = bodyDoc.documentElement();
+            if (elemName(body) == "FBD" || elemName(body) == "LD") {
+                auto elems = parseFbd(body);
+                fbdResult = fbdToSt(elems);
+                hasGraphBody = true;
+            } else if (elemName(body) == "SFC") {
+                hasGraphBody = true;
+                fbdResult.lines = sfcToText(body);
+            }
+        }
+    }
+
+    emitNativeVarBlock(inputVars, "VAR_INPUT", out);
+    emitNativeVarBlock(outputVars, "VAR_OUTPUT", out);
+    emitNativeVarBlock(inOutVars, "VAR_IN_OUT", out);
+    emitNativeVarBlock(localVars, "VAR", out);
+    QStringList tempNames = fbdResult.boolTemps;
+    for (const QString& edgeName : fbdResult.edgeTemps)
+        if (!tempNames.contains(edgeName))
+            tempNames << edgeName;
+    emitBoolTemps(tempNames, out);
+    emitNativeVarBlock(externalVars, "VAR_EXTERNAL", out);
+
+    if (hasGraphBody) {
+        for (const QString& ln : fbdResult.lines)
+            out << ln;
+    } else {
+        const QString code = pouEl.firstChildElement("code").text();
+        for (const QString& ln : code.split('\n'))
+            out << "  " + ln;
+    }
+
+    out << endKeyword;
+    out << "";
+    return out;
+}
+
+static QString doConvertNative(const QDomElement& root)
+{
+    QStringList out;
+    out << "(* Generated by TiZi StGenerator - IEC 61131-3 Structured Text *)";
+    out << "";
+
+    QDomNodeList pouNodes = root.elementsByTagName("pou");
+    QDomElement firstProgram;
+    for (int i = 0; i < pouNodes.count(); ++i) {
+        QDomElement pou = pouNodes.at(i).toElement();
+        if (pou.isNull()) continue;
+        const QString pouType = nativePouType(pou.attribute("type"));
+        if (firstProgram.isNull() && pouType == "program")
+            firstProgram = pou;
+        out << QString("(* %1 : %2 *)")
+               .arg(pou.attribute("name"), pouType);
+        for (const QString& ln : convertNativePou(pou))
+            out << ln;
+    }
+
+    if (!firstProgram.isNull()) {
+        const QString progName = firstProgram.attribute("name");
+        out << "CONFIGURATION config";
+        out << "  RESOURCE resource1 ON PLC";
+        out << "    TASK main_task(INTERVAL := T#10ms, PRIORITY := 0);";
+        out << QString("    PROGRAM main_instance WITH main_task : %1;").arg(progName);
+        out << "  END_RESOURCE";
+        out << "END_CONFIGURATION";
+        out << "";
+    }
+
+    g_lastError.clear();
+    return out.join('\n');
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -692,7 +906,10 @@ static QString doConvert(const QString& xmlContent)
     }
 
     QDomElement root = doc.documentElement();
-    if (root.localName() != "project") {
+    if (elemName(root) == "TiZiProject") {
+        return doConvertNative(root);
+    }
+    if (elemName(root) != "project") {
         g_lastError = "Root element is not <project>";
         return {};
     }

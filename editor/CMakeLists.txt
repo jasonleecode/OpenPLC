@@ -117,11 +117,17 @@ else()
 endif()
 
 # ==========================================
-# 4b. 编译时宏：library.xml 路径（源码目录绝对路径，仅开发时使用）
+# 4b. 编译时宏：工具路径（源码目录绝对路径，仅开发时使用）
 # ==========================================
+if(APPLE)
+    set(TIZI_MATIEC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools/matiec_mac")
+else()
+    set(TIZI_MATIEC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools/matiec_linux")
+endif()
+
 target_compile_definitions(TiZi PRIVATE
     LIBRARY_XML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/conf/library.xml"
-    MATIEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/matiec_mac"
+    MATIEC_DIR="${TIZI_MATIEC_DIR}"
     DRIVERS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/drivers"
     WASI_SDK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/wasm/wasi-sdk"
 )

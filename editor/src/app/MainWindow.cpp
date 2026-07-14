@@ -40,6 +40,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QDataStream>
 #include <QMenu>
 #include <QTimer>
 #include <QDomDocument>
@@ -1660,6 +1661,7 @@ void MainWindow::buildProject()
         return;
     }
 
+    m_lastBuildOutput.clear();
     m_consoleEdit->clear();
     m_consoleTabs->setCurrentWidget(m_consoleEdit);
 
@@ -1706,15 +1708,27 @@ void MainWindow::buildProject()
     auto findMatiecDir = []() -> QString {
         QStringList candidates = {
             QString(MATIEC_DIR),    // CMake 注入的绝对路径（开发模式）
+#if defined(Q_OS_MAC)
             // macOS .app bundle：Contents/MacOS → OpenPLC/tools/matiec_mac
             QDir::cleanPath(QCoreApplication::applicationDirPath()
                             + "/../../../../../tools/matiec_mac"),
+#else
+            QDir::cleanPath(QCoreApplication::applicationDirPath()
+                            + "/../../tools/matiec_linux"),
+#endif
             // Linux / non-bundle build 目录
             QDir::cleanPath(QCoreApplication::applicationDirPath()
                             + "/../../tools/matiec_mac"),
         };
         for (const QString& p : candidates) {
-            if (QFileInfo(p + "/iec2c").exists())
+#if !defined(Q_OS_MAC)
+            if (p.endsWith("/matiec_mac"))
+                continue;
+#endif
+            QFileInfo iec2c(p + "/iec2c");
+            QFileInfo iec2iec(p + "/iec2iec");
+            if (iec2c.exists() && iec2iec.exists()
+                && iec2c.isExecutable() && iec2iec.isExecutable())
                 return p;
         }
         return {};
@@ -1984,14 +1998,49 @@ void MainWindow::buildProject()
             }
         }
 
+        const QString imageFile = buildDir + "/" + outputName + ".xcode.bin";
+        {
+            QFile wasmIn(wasmFile);
+            if (!wasmIn.open(QFile::ReadOnly)) {
+                m_consoleEdit->appendPlainText("       Error: cannot read WASM output.");
+                statusBar()->showMessage("Build failed.", 4000);
+                return;
+            }
+            const QByteArray wasmBytes = wasmIn.readAll();
+
+            QFile imageOut(imageFile);
+            if (!imageOut.open(QFile::WriteOnly | QFile::Truncate)) {
+                m_consoleEdit->appendPlainText("       Error: cannot write XCODE download image.");
+                statusBar()->showMessage("Build failed.", 4000);
+                return;
+            }
+            QDataStream ds(&imageOut);
+            ds.setByteOrder(QDataStream::LittleEndian);
+            ds << quint32(0x57415300u); // XCODE_WASM_MAGIC, "WAS\0"
+            ds << quint32(wasmBytes.size());
+            imageOut.write(wasmBytes);
+        }
+
         qint64 wasmSize = QFileInfo(wasmFile).size();
+        qint64 imageSize = QFileInfo(imageFile).size();
+        const QJsonObject memMap = driver["memory_map"].toObject();
+        const qint64 maxImageSize = qint64(memMap["user_flash_size_kb"].toInt(0)) * 1024;
+        if (maxImageSize > 0 && imageSize > maxImageSize) {
+            m_consoleEdit->appendPlainText(
+                QString("       Error: XCODE image too large: %1 bytes / %2 max")
+                    .arg(imageSize).arg(maxImageSize));
+            statusBar()->showMessage("Build failed: output too large.", 4000);
+            return;
+        }
+
+        m_lastBuildOutput = imageFile;
         m_consoleEdit->appendPlainText("─────────────────────────────────────────");
         m_consoleEdit->appendPlainText(
-            QString("[ Build ] SUCCESS  -->  %1  (%2 bytes)")
-            .arg(QFileInfo(wasmFile).fileName()).arg(wasmSize));
+            QString("[ Build ] SUCCESS  -->  %1  (%2 bytes, wasm %3 bytes)")
+            .arg(QFileInfo(imageFile).fileName()).arg(imageSize).arg(wasmSize));
         statusBar()->showMessage(
             QString("Build complete -- %1 (%2 bytes)")
-            .arg(QFileInfo(wasmFile).fileName()).arg(wasmSize), 5000);
+            .arg(QFileInfo(imageFile).fileName()).arg(imageSize), 5000);
         return;
     }
 
@@ -2124,6 +2173,13 @@ void MainWindow::buildProject()
         // 显示 .bin 大小与容量限制
         qint64 sz    = QFileInfo(binFile).size();
         qint64 maxSz = pb["max_size_bytes"].toInteger(0);
+        if (maxSz > 0 && sz > maxSz) {
+            m_consoleEdit->appendPlainText(
+                QString("       Error: output too large: %1 bytes / %2 max")
+                    .arg(sz).arg(maxSz));
+            statusBar()->showMessage("Build failed: output too large.", 4000);
+            return;
+        }
         QString sizeStr = maxSz > 0
             ? QString("%1 bytes / %2 max").arg(sz).arg(maxSz)
             : QString("%1 bytes").arg(sz);
@@ -2134,6 +2190,7 @@ void MainWindow::buildProject()
     m_consoleEdit->appendPlainText("─────────────────────────────────────────");
     m_consoleEdit->appendPlainText(
         QString("[ Build ] SUCCESS  -->  %1").arg(finalOutput));
+    m_lastBuildOutput = finalOutput;
     statusBar()->showMessage(
         QString("Build complete -- %1").arg(QFileInfo(finalOutput).fileName()), 5000);
 }
@@ -2144,6 +2201,11 @@ void MainWindow::buildProject()
 void MainWindow::downloadProject()
 {
     DownloadDialog dlg(this);
+    if (!m_lastBuildOutput.isEmpty() && QFileInfo::exists(m_lastBuildOutput)) {
+        dlg.setBinaryPath(m_lastBuildOutput);
+    } else {
+        statusBar()->showMessage("No recent build output. Select a binary manually or build first.", 5000);
+    }
     dlg.exec();
 }
 
