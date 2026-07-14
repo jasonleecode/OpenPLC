@@ -130,6 +130,19 @@ struct Elem {
     QMap<QString, QString> outSig;
 };
 
+static QList<Conn> inputConnections(const QDomElement& owner)
+{
+    QList<Conn> inputs;
+    const QDomElement cpi = fc(owner, "connectionPointIn");
+    for (const QDomElement& con : ch(cpi, "connection")) {
+        bool ok = false;
+        const int refId = con.attribute("refLocalId").toInt(&ok);
+        if (!ok) continue;
+        inputs << Conn{refId, con.attribute("formalParameter"), {}};
+    }
+    return inputs;
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // 解析 FBD/LD 体内的所有图元
 // ───────────────────────────────────────────────────────────────────────────
@@ -152,18 +165,12 @@ static QMap<int, Elem> parseFbd(const QDomElement& bodyEl)
         else if (tag == "outVariable") {
             el.kind       = Elem::OutVar;
             el.expression = fc(e, "expression").text().trimmed();
-            QDomElement con = fc(fc(e, "connectionPointIn"), "connection");
-            if (!con.isNull())
-                el.inputs << Conn{con.attribute("refLocalId").toInt(),
-                                  con.attribute("formalParameter"), {}};
+            el.inputs     = inputConnections(e);
         }
         else if (tag == "inOutVariable") {
             el.kind       = Elem::InOutVar;
             el.expression = fc(e, "expression").text().trimmed();
-            QDomElement con = fc(fc(e, "connectionPointIn"), "connection");
-            if (!con.isNull())
-                el.inputs << Conn{con.attribute("refLocalId").toInt(),
-                                  con.attribute("formalParameter"), {}};
+            el.inputs     = inputConnections(e);
         }
         else if (tag == "block") {
             el.kind         = Elem::Block;
@@ -190,18 +197,14 @@ static QMap<int, Elem> parseFbd(const QDomElement& bodyEl)
             el.expression = fc(e, "variable").text().trimmed();
             el.negated    = (e.attribute("negated") == "true");
             el.edge       = e.attribute("edge", "none");
-            QDomElement con = fc(fc(e, "connectionPointIn"), "connection");
-            if (!con.isNull())
-                el.inputs << Conn{con.attribute("refLocalId").toInt(), {}, {}};
+            el.inputs     = inputConnections(e);
         }
         else if (tag == "coil") {
             el.kind       = Elem::Coil;
             el.expression = fc(e, "variable").text().trimmed();
             el.negated    = (e.attribute("negated") == "true");
             el.storage    = e.attribute("storage", "none");
-            QDomElement con = fc(fc(e, "connectionPointIn"), "connection");
-            if (!con.isNull())
-                el.inputs << Conn{con.attribute("refLocalId").toInt(), {}, {}};
+            el.inputs     = inputConnections(e);
         }
         else if (tag == "leftPowerRail") {
             el.kind = Elem::PowerRail;
@@ -360,6 +363,20 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
         }
     };
 
+    auto inputSignal = [&](const Elem& el, const QString& defaultValue) -> QString {
+        QStringList parts;
+        for (const Conn& c : el.inputs) {
+            QString s = sig(c.refId, c.refPort);
+            if (!s.isEmpty()) parts << s;
+        }
+        if (parts.isEmpty()) return defaultValue;
+        if (parts.size() == 1) return parts.first();
+
+        for (QString& part : parts)
+            part = QString("(%1)").arg(part);
+        return parts.join(" OR ");
+    };
+
     QList<int> order = topoSort(elems);
 
     for (int id : order) {
@@ -370,18 +387,14 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
             break;
 
         case Elem::InOutVar: {
-            if (!el.inputs.isEmpty() && el.inputs[0].refId >= 0) {
-                QString s = sig(el.inputs[0].refId, el.inputs[0].refPort);
-                if (!s.isEmpty() && s != el.expression)
-                    result.lines << QString("  %1 := %2;").arg(el.expression, s);
-            }
+            QString s = inputSignal(el, {});
+            if (!s.isEmpty() && s != el.expression)
+                result.lines << QString("  %1 := %2;").arg(el.expression, s);
             break;
         }
 
         case Elem::Contact: {
-            QString in = el.inputs.isEmpty() ? "TRUE"
-                       : sig(el.inputs[0].refId, el.inputs[0].refPort);
-            if (in.isEmpty()) in = "TRUE";
+            QString in = inputSignal(el, "TRUE");
             QString varExpr;
             if (el.edge == "rising" || el.edge == "falling") {
                 const QString prev = edgeTemp(el.localId);
@@ -413,9 +426,7 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
         }
 
         case Elem::Coil: {
-            QString in = el.inputs.isEmpty() ? "FALSE"
-                       : sig(el.inputs[0].refId, el.inputs[0].refPort);
-            if (in.isEmpty()) in = "FALSE";
+            QString in = inputSignal(el, "FALSE");
             QString val = el.negated ? QString("NOT (%1)").arg(in) : in;
             if (el.storage == "set") {
                 result.lines << QString("  IF %1 THEN").arg(val);
@@ -469,11 +480,9 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
         }
 
         case Elem::OutVar: {
-            if (!el.inputs.isEmpty()) {
-                QString s = sig(el.inputs[0].refId, el.inputs[0].refPort);
-                if (s.isEmpty()) s = "FALSE";
+            QString s = inputSignal(el, "FALSE");
+            if (!s.isEmpty())
                 result.lines << QString("  %1 := %2;").arg(el.expression, s);
-            }
             break;
         }
 

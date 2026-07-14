@@ -47,21 +47,32 @@ run_case() {
     "$MATIEC_DIR/iec2c" -p -i -I "$MATIEC_DIR/lib" -T "$out_dir" "$st_file" > "$WORK_DIR/${name}_iec2c.out"
 }
 
+compile_linux_driver() {
+    local name="$1"
+    gcc -w \
+        -I "$MATIEC_DIR/lib/C" \
+        -I "$WORK_DIR/${name}_iec2c" \
+        "$EDITOR_DIR/tests/drivers/linux/templates/plc_main.c" \
+        "$WORK_DIR/${name}_iec2c/config.c" \
+        "$WORK_DIR/${name}_iec2c/resource1.c" \
+        -o "$WORK_DIR/${name}_program" \
+        -lm
+}
+
 run_case "plcopen_first_steps" "$EDITOR_DIR/tests/first_steps/plc.tizi"
 run_case "native_ld" "$EDITOR_DIR/tests/fixtures/native_ld.tizi"
+run_case "native_ld_parallel_reset" "$EDITOR_DIR/tests/fixtures/native_ld_parallel_reset.tizi"
 
 grep -q "TIZI_TMP" "$WORK_DIR/native_ld.st"
 grep -q "TIZI_EDGE3" "$WORK_DIR/native_ld.st"
 grep -q "IF TIZI_TMP" "$WORK_DIR/native_ld.st"
 
-gcc -w \
-    -I "$MATIEC_DIR/lib/C" \
-    -I "$WORK_DIR/native_ld_iec2c" \
-    "$EDITOR_DIR/tests/drivers/linux/templates/plc_main.c" \
-    "$WORK_DIR/native_ld_iec2c/config.c" \
-    "$WORK_DIR/native_ld_iec2c/resource1.c" \
-    -o "$WORK_DIR/native_ld_program" \
-    -lm
+grep -q "TIZI_EDGE3" "$WORK_DIR/native_ld_parallel_reset.st"
+grep -q " OR " "$WORK_DIR/native_ld_parallel_reset.st"
+grep -q "Y := FALSE;" "$WORK_DIR/native_ld_parallel_reset.st"
+
+compile_linux_driver "native_ld"
+compile_linux_driver "native_ld_parallel_reset"
 
 echo "Build pipeline verification passed."
 echo "Artifacts: $WORK_DIR"

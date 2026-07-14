@@ -14,6 +14,7 @@
 
 - PLCopen/Beremiz `.tizi` 示例：`StGenerator -> iec2iec -> iec2c`
 - TiZi 原生 `<TiZiProject>` 最小 LD 示例：`StGenerator -> iec2iec -> iec2c`
+- TiZi 原生 LD 并联分支示例：多 `connectionPointIn`、falling edge、reset coil
 - TiZi 原生 LD 示例继续通过 Linux driver wrapper 编译为本机可执行文件
 - Qt Editor 目标：`cmake --build editor/build --target TiZi --parallel 2`
 
@@ -121,18 +122,31 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - NCC 镜像要求 offset 0 为 `USER_LOGIC_MAGIC = 0xDEADBEEF`。
 - XCODE 镜像要求 offset 0 为 `XCODE_WASM_MAGIC = 0x57415300`，并校验 header 中的 wasm size 与文件长度一致。
 
+### 9. LD 并联分支与多输入连接
+
+原问题：`StGenerator` 解析 contact、coil、outVariable、inOutVariable 时只读取第一个 `<connection>`，并联支路或多个输入连接会被静默丢弃。
+
+当前状态：
+
+- 这些 LD/FBD 图元会保留所有 `connectionPointIn/connection`。
+- 多个布尔输入会生成 `OR` 表达式。
+- 新增 `native_ld_parallel_reset.tizi`，覆盖：
+  - 左母线并联到两个触点
+  - falling edge contact
+  - 多输入 reset coil
+  - `StGenerator -> iec2iec -> iec2c -> Linux driver wrapper`
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
 
 当前 `StGenerator` 已覆盖基础路径，但仍不是完整 PLCopen 图形语言编译器。需要继续测试：
 
-- 并联分支
 - 多输出线圈
-- 多个 `connectionPointIn` / `connectionPointOut`
 - block 多输出端口和 `formalParameter`
 - 反馈回路
 - `inOutVariable` 复杂引用
+- 图元多 `connectionPointOut` 与端口选择
 
 ### 2. 边沿触点语义需要硬件/周期级确认
 
