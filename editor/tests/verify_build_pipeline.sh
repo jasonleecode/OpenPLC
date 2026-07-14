@@ -60,6 +60,7 @@ compile_linux_driver() {
 }
 
 run_case "plcopen_first_steps" "$EDITOR_DIR/tests/first_steps/plc.tizi"
+run_case "plcopen_traffic" "$EDITOR_DIR/tests/first_steps/traffic.tizi"
 run_case "native_ld" "$EDITOR_DIR/tests/fixtures/native_ld.tizi"
 run_case "native_ld_parallel_reset" "$EDITOR_DIR/tests/fixtures/native_ld_parallel_reset.tizi"
 run_case "native_fbd_block_multi_input" "$EDITOR_DIR/tests/fixtures/native_fbd_block_multi_input.tizi"
@@ -74,7 +75,10 @@ grep -q "Y := FALSE;" "$WORK_DIR/native_ld_parallel_reset.st"
 
 grep -q "AND(IN1 := (A) OR (B), IN2 := C)" "$WORK_DIR/native_fbd_block_multi_input.st"
 grep -q "Y := AND" "$WORK_DIR/native_fbd_block_multi_input.st"
+grep -q "SwitchButton : BOOL;" "$WORK_DIR/plcopen_traffic.st"
+grep -q "INITIAL_STEP Standstill" "$WORK_DIR/plcopen_traffic.st"
 
+compile_linux_driver "plcopen_traffic"
 compile_linux_driver "native_ld"
 compile_linux_driver "native_ld_parallel_reset"
 compile_linux_driver "native_fbd_block_multi_input"

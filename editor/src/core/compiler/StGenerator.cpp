@@ -54,7 +54,11 @@ static QString itype(const QDomElement& typeEl)
     if (typeEl.isNull()) return "ANY";
     QDomElement child = typeEl.firstChildElement();
     if (child.isNull()) return "ANY";
-    if (elemName(child) == "derived") return child.attribute("name");
+    if (elemName(child) == "derived") {
+        const QString name = child.attribute("name");
+        if (name == "HMI_BOOL") return "BOOL";
+        return name;
+    }
     if (elemName(child) == "array") {
         QString base = itype(fc(child, "baseType"));
         return QString("ARRAY OF %1").arg(base);

@@ -13,6 +13,7 @@
 修复后，以下链路已经过验证：
 
 - PLCopen/Beremiz `.tizi` 示例：`StGenerator -> iec2iec -> iec2c`
+- PLCopen `traffic.tizi` SFC/FBD 混合示例：`StGenerator -> iec2iec -> iec2c -> Linux driver wrapper`
 - TiZi 原生 `<TiZiProject>` 最小 LD 示例：`StGenerator -> iec2iec -> iec2c`
 - TiZi 原生 LD 并联分支示例：多 `connectionPointIn`、falling edge、reset coil
 - TiZi 原生 FBD block 示例：同一 `formalParameter` 多连接合成为布尔 `OR`
@@ -148,6 +149,15 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - `connection formalParameter="..."` 仍用于选择上游 block 的输出端口。
 - 新增 `native_fbd_block_multi_input.tizi`，覆盖 `AND(IN1 := (A) OR (B), IN2 := C)` 并通过 `iec2iec -> iec2c -> Linux driver wrapper`。
 
+### 11. Beremiz HMI_BOOL 类型兼容
+
+原问题：`traffic.tizi` 的 `<dataTypes/>` 为空，但主程序变量使用 Beremiz/SVGHMI 扩展类型 `HMI_BOOL`，生成 ST 后 matiec 会在变量声明处报错。
+
+当前状态：
+
+- `HMI_BOOL` 会在 ST 生成时降级为 IEC 标准 `BOOL`。
+- `traffic.tizi` 已加入 `verify_build_pipeline.sh`，覆盖 SFC/FBD 混合样例、标准库 FB、多输出端口引用和 Linux wrapper 编译。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -160,15 +170,11 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - `inOutVariable` 复杂引用
 - 图元多 `connectionPointOut` 与端口选择
 
-### 2. PLCopen SFC 生成兼容性不足
-
-`editor/tests/first_steps/traffic.tizi` 可以生成 ST，但当前输出不能通过 `matiec_linux/iec2iec`。该样例混合了 SFC、多个功能块输出端口和 action/transition 结构，后续需要单独修复 PLCopen SFC 生成逻辑并加入回归。
-
-### 3. 边沿触点语义需要硬件/周期级确认
+### 2. 边沿触点语义需要硬件/周期级确认
 
 当前边沿逻辑按每次 POU 扫描更新 `TIZI_EDGE*`。这通过 matiec 语法和 C 生成验证，但还需要在真实扫描周期中确认与预期 PLC 行为一致。
 
-### 4. XCODE 未做完整运行验证
+### 3. XCODE 未做完整运行验证
 
 已修复下载镜像格式，但还没有验证：
 
@@ -177,7 +183,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - WAMR 加载镜像
 - `plc_init()` / `plc_run(ms)` 实际调用
 
-### 5. Linux matiec 二进制直接入库
+### 4. Linux matiec 二进制直接入库
 
 当前方案能工作，但二进制入库会带来仓库体积和平台兼容风险。可选后续方案：
 
@@ -185,7 +191,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 增加构建脚本，从 matiec 源码构建本机工具。
 - 在 CI 中验证工具可执行。
 
-### 6. 非 LD 图形编辑器仍有占位
+### 5. 非 LD 图形编辑器仍有占位
 
 Editor 中仍有部分功能是占位或未实现：
 
