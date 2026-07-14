@@ -60,6 +60,7 @@ compile_linux_driver() {
 }
 
 run_case "plcopen_first_steps" "$EDITOR_DIR/tests/first_steps/plc.tizi"
+run_case "plcopen_first_steps_linux" "$EDITOR_DIR/tests/first_steps/plcc.tizi"
 run_case "plcopen_traffic" "$EDITOR_DIR/tests/first_steps/traffic.tizi"
 run_case "native_ld" "$EDITOR_DIR/tests/fixtures/native_ld.tizi"
 run_case "native_ld_parallel_reset" "$EDITOR_DIR/tests/fixtures/native_ld_parallel_reset.tizi"
@@ -79,6 +80,7 @@ grep -q "SwitchButton : BOOL;" "$WORK_DIR/plcopen_traffic.st"
 grep -q "INITIAL_STEP Standstill" "$WORK_DIR/plcopen_traffic.st"
 
 compile_linux_driver "plcopen_traffic"
+compile_linux_driver "plcopen_first_steps_linux"
 compile_linux_driver "native_ld"
 compile_linux_driver "native_ld_parallel_reset"
 compile_linux_driver "native_fbd_block_multi_input"
