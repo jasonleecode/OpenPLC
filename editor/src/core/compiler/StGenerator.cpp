@@ -5,6 +5,7 @@
 #include <QSet>
 #include <QStringList>
 #include <algorithm>
+#include <functional>
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 模块内部实现（匿名命名空间）
@@ -556,6 +557,7 @@ static QStringList sfcToText(const QDomElement& sfcEl,
                              const QMap<QString, QString>& namedTransitions = QMap<QString, QString>())
 {
     QStringList out;
+    QMap<int, Elem> conditionElems = parseFbd(sfcEl);
 
     struct StepInfo {
         QString name;
@@ -573,6 +575,112 @@ static QStringList sfcToText(const QDomElement& sfcEl,
         if (!duration.trimmed().isEmpty())
             return QString("%1(%2, %3);").arg(name, q, duration.trimmed());
         return QString("%1(%2);").arg(name, q);
+    };
+
+    std::function<QString(int, const QString&, QSet<int>&)> simpleSignal;
+    auto simpleInputSignal = [&](const Elem& el, const QString& defaultValue, QSet<int>& visiting) -> QString {
+        QStringList parts;
+        for (const Conn& c : el.inputs) {
+            QString s = simpleSignal(c.refId, c.refPort, visiting);
+            if (s.isEmpty()) return QString();
+            parts << s;
+        }
+        if (parts.isEmpty()) return defaultValue;
+        if (parts.size() == 1) return parts.first();
+
+        for (QString& part : parts)
+            part = QString("(%1)").arg(part);
+        return parts.join(" OR ");
+    };
+
+    simpleSignal = [&](int refId, const QString& refPort, QSet<int>& visiting) -> QString {
+        if (refId < 0 || !conditionElems.contains(refId) || visiting.contains(refId))
+            return QString();
+
+        visiting.insert(refId);
+        const Elem& src = conditionElems[refId];
+        QString signal;
+        switch (src.kind) {
+        case Elem::InVar:
+            signal = src.negated ? QString("NOT (%1)").arg(src.expression) : src.expression;
+            break;
+        case Elem::PowerRail:
+            signal = "TRUE";
+            break;
+        case Elem::Contact: {
+            QString in = simpleInputSignal(src, "TRUE", visiting);
+            if (!in.isEmpty()) {
+                QString varExpr = src.negated
+                    ? QString("NOT %1").arg(src.expression)
+                    : src.expression;
+                signal = (in == "TRUE")
+                    ? varExpr
+                    : QString("(%1) AND %2").arg(in, varExpr);
+            }
+            break;
+        }
+        case Elem::Block: {
+            if (!src.instanceName.isEmpty())
+                break;
+
+            QMap<QString, QStringList> namedInputs;
+            QStringList positionalArgs;
+            for (const Conn& c : src.inputs) {
+                QString s = simpleSignal(c.refId, c.refPort, visiting);
+                if (s.isEmpty()) {
+                    signal.clear();
+                    visiting.remove(refId);
+                    return signal;
+                }
+                if (!c.param.isEmpty())
+                    namedInputs[c.param] << s;
+                else
+                    positionalArgs << s;
+            }
+
+            auto mergedInput = [&](const QString& param) -> QString {
+                QStringList values = namedInputs.value(param);
+                if (values.isEmpty()) return QString();
+                if (values.size() == 1) return values.first();
+                for (QString& part : values)
+                    part = QString("(%1)").arg(part);
+                return values.join(" OR ");
+            };
+
+            if (src.typeName == "NOT") {
+                QString in = mergedInput("IN");
+                if (in.isEmpty() && positionalArgs.size() == 1)
+                    in = positionalArgs.first();
+                if (!in.isEmpty())
+                    signal = QString("NOT (%1)").arg(in);
+            } else if (src.typeName == "AND" || src.typeName == "OR") {
+                QStringList args;
+                for (const auto& [param, values] : namedInputs.asKeyValueRange()) {
+                    Q_UNUSED(param);
+                    QStringList localValues = values;
+                    if (localValues.size() == 1)
+                        args << localValues.first();
+                    else if (!localValues.isEmpty()) {
+                        for (QString& part : localValues)
+                            part = QString("(%1)").arg(part);
+                        args << localValues.join(" OR ");
+                    }
+                }
+                args << positionalArgs;
+                if (!args.isEmpty()) {
+                    for (QString& arg : args)
+                        arg = QString("(%1)").arg(arg);
+                    signal = args.join(src.typeName == "AND" ? " AND " : " OR ");
+                }
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        visiting.remove(refId);
+        return signal;
     };
 
     // 解析所有节点
@@ -596,6 +704,18 @@ static QStringList sfcToText(const QDomElement& sfcEl,
                 const QString refName = ref.attribute("name").trimmed();
                 if (!refName.isEmpty())
                     conditionText = namedTransitions.value(refName, refName);
+            }
+            if (conditionText.isEmpty()) {
+                QDomElement cpi = fc(cond, "connectionPointIn");
+                QDomElement con = fc(cpi, "connection");
+                if (!con.isNull()) {
+                    bool ok = false;
+                    int refId = con.attribute("refLocalId").toInt(&ok);
+                    if (ok) {
+                        QSet<int> visiting;
+                        conditionText = simpleSignal(refId, con.attribute("formalParameter"), visiting);
+                    }
+                }
             }
             transCond[id] = conditionText;
         }

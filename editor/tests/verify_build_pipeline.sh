@@ -171,6 +171,12 @@ grep -q "ACTION BLINK_ORANGE_LIGHT:" "$WORK_DIR/plcopen_traffic.st"
 grep -q "TON1(IN := NOT ORANGE_LIGHT, PT := T#500ms);" "$WORK_DIR/plcopen_traffic.st"
 grep -q "R_TRIG1(CLK := TON1.Q);" "$WORK_DIR/plcopen_traffic.st"
 grep -q ":= NOT (SWITCH_BUTTON);" "$WORK_DIR/plcopen_traffic.st"
+awk '
+    /TRANSITION FROM PEDESTRIAN_RED TO Standstill/ { in_transition=1 }
+    in_transition && /:= NOT SWITCH_BUTTON;/ { ok=1 }
+    in_transition && /END_TRANSITION/ { exit ok ? 0 : 1 }
+    END { exit ok ? 0 : 1 }
+' "$WORK_DIR/plcopen_traffic.st"
 
 compile_linux_driver "plcopen_traffic"
 compile_linux_driver "plcopen_first_steps_linux"

@@ -320,6 +320,16 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - `NOT` FBD block 会生成标准 `NOT (<expr>)` 表达式，避免在 transition 条件里生成 matiec 不接受的 `NOT(IN := ...)`。
 - `verify_build_pipeline.sh` 已用 `traffic.tizi` 覆盖 `BLINK_ORANGE_LIGHT`、TON/R_TRIG 调用、duration action 和 `STOP` transition 展开。
 
+### 23. SFC transition 直接连接 LD/FBD 条件
+
+原风险：PLCopen SFC transition 的 `<condition>` 可以直接连接图形图元，例如 `traffic.tizi` 中 `PEDESTRIAN_RED -> Standstill` 的条件连接到一个 LD negated contact。此前这类 condition 没有解析，会退化成默认 `TRUE`。
+
+当前状态：
+
+- SFC transition condition 会尝试解析直接连接的无副作用布尔图形：`inVariable`、`leftPowerRail`、`contact`、以及无实例的简单 `NOT`/`AND`/`OR` block。
+- 遇到 TON/SR/CTU 等有状态功能块时暂不展开，避免只引用 `.Q` 但漏掉功能块调用。
+- `verify_build_pipeline.sh` 已断言 `traffic.tizi` 中 `PEDESTRIAN_RED -> Standstill` 生成 `:= NOT SWITCH_BUTTON;`。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -330,6 +340,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - block 多输出端口已有最小 CTU fixture 覆盖；仍需在大型 PLCopen 样例中完整回归
 - 反馈回路
 - 图元多 `connectionPointOut` 与端口选择
+- SFC transition condition 中带 TON/SR 等有状态功能块的图形条件调用顺序
 
 ### 2. 边沿触点真实硬件行为需要确认
 
