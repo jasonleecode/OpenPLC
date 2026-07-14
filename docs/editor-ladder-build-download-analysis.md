@@ -52,7 +52,7 @@ Linux WAMR runtime 工具校验脚本：
 editor/tests/verify_wamr_linux.sh
 ```
 
-当前仓库里的 `editor/tools/wasm/wasi-sdk` 是指向 macOS 下载目录的断链；Linux 上需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定。
+当前仓库里的 `editor/tools/wasm/wasi-sdk` 保留给 macOS 默认工具路径；Linux 上需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定，避免误用 macOS 工具路径。
 
 默认使用：
 
@@ -259,6 +259,16 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 脚本会检查 `iwasm` 是 Linux x86_64 ELF、版本为 `2.4.3`，并确认 `libiwasm.a` 与 `wasm_export.h`、`wasm_c_api.h`、`lib_export.h` 存在。
 - 脚本会编译并链接一个最小 C 程序调用 `wasm_runtime_get_version()`，确认 WAMR SDK 头文件和静态库组合可用。
 
+### 18. WASI/WAMR 工具路径平台隔离
+
+原风险：`editor/tools/wasm/wasi-sdk` 和 `editor/tools/wasm/wamrc` 是 macOS 工具路径/二进制，在 Linux 上不可用，容易被误认为跨平台工具。
+
+当前状态：
+
+- 保留 macOS 工具目录，不删除 `editor/tools/wasm` 下已有内容。
+- Linux XCODE 验证文案改为要求 native `WASI_SDK_DIR` / `WAMR_IWASM`。
+- Editor 找不到 WASI-SDK 时会明确提示设置 `WASI_SDK_DIR` 或安装到默认位置。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -275,7 +285,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 
 ### 3. XCODE/WAMR 真实运行验证
 
-已有 XCODE 构建和镜像格式验证脚本，也已加入 Linux `iwasm` runtime 校验；但当前机器缺少可用 Linux WASI-SDK，仓库内 `wamrc` 也是 macOS arm64 可执行文件。仍需要在安装工具链后验证：
+已有 XCODE 构建和镜像格式验证脚本，也已加入 Linux `iwasm` runtime 校验；但当前机器缺少可用 Linux WASI-SDK。仍需要在安装工具链后验证：
 
 - `verify_xcode_pipeline.sh` 的真实 wasm 编译路径
 - `.xcode.bin` 下载到 Runtime B 区

@@ -1994,7 +1994,8 @@ void MainWindow::buildProject()
         if (wasiSdkDir.isEmpty()) {
             m_consoleEdit->appendPlainText(
                 "       Error: WASI-SDK not found.\n"
-                "       Expected at: " + QString(WASI_SDK_DIR));
+                "       Set WASI_SDK_DIR to a native WASI-SDK installation, or install one at:\n"
+                "       " + QString(WASI_SDK_DIR));
             statusBar()->showMessage("Build failed.", 4000);
             return;
         }

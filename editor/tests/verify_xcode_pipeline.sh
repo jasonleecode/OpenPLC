@@ -24,7 +24,7 @@ fi
 
 if [[ ! -x "$WASI_SDK/bin/clang" ]]; then
     echo "Skipping XCODE verification: WASI-SDK clang not found or not executable." >&2
-    echo "Set WASI_SDK_DIR to a Linux WASI-SDK installation to run this test." >&2
+    echo "Set WASI_SDK_DIR to a native WASI-SDK installation to run this test." >&2
     echo "Current WASI_SDK_DIR: $WASI_SDK" >&2
     if [[ "${REQUIRE_XCODE_TOOLS:-0}" == "1" ]]; then
         exit 1
@@ -34,7 +34,7 @@ fi
 
 if [[ ! -x "$IWASM" ]]; then
     echo "Skipping XCODE runtime execution check: iwasm not found or not executable." >&2
-    echo "Set WAMR_IWASM to a Linux iwasm binary to run this test." >&2
+    echo "Set WAMR_IWASM to a native iwasm binary to run this test." >&2
     echo "Current WAMR_IWASM: $IWASM" >&2
     if [[ "${REQUIRE_XCODE_TOOLS:-0}" == "1" ]]; then
         exit 1
