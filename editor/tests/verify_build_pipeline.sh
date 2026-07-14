@@ -14,6 +14,7 @@ if [[ ! -x "$MATIEC_DIR/iec2iec" || ! -x "$MATIEC_DIR/iec2c" ]]; then
 fi
 
 "$EDITOR_DIR/tests/verify_matiec_tools.sh" > "$WORK_DIR.matiec.out"
+"$EDITOR_DIR/tests/verify_tcp_runtime_server.sh" > "$WORK_DIR.tcp.out"
 
 if [[ ! -d "$QT_ROOT/include/QtCore" || ! -d "$QT_ROOT/include/QtXml" ]]; then
     echo "Qt root not found. Set QT_ROOT to a Qt 6 gcc_64 installation." >&2

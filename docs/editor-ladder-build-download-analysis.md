@@ -40,6 +40,12 @@ matiec 工具链校验脚本：
 editor/tests/verify_matiec_tools.sh
 ```
 
+TCP 下载协议服务端测试：
+
+```bash
+editor/tests/verify_tcp_runtime_server.sh
+```
+
 当前仓库里的 `editor/tools/wasm/wasi-sdk` 是指向 macOS 下载目录的断链；Linux 上需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定。
 
 默认使用：
@@ -226,6 +232,17 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - Ethernet 下载标签页文案已改为实际 TCP 传输说明；`TcpTransport` 已通过 `QTcpSocket` 接入下载协议。
 - 未知 POU 语言的兜底文案改为明确的 unsupported language；LD/FBD/SFC 仍走统一图形编辑器。
 
+### 16. Ethernet 下载协议服务端回归
+
+原风险：Editor 端 TCP transport 已接入，但缺少服务端侧协议回归，后续改动可能破坏 TiZi 下载帧格式而不被测试发现。
+
+当前状态：
+
+- 新增 `editor/tests/tools/tizi_tcp_runtime_server.py`，在桌面 Linux 上模拟 `runtime/app/runtime.c` 使用的 TiZi 字节帧协议。
+- 新增 `verify_tcp_runtime_server.sh`，覆盖 `PING`、`ERASE`、`WRITE_PAGE`、`VERIFY`、`GET_STATUS`、`SET_RUN`、`READ_IO`、`RESET`。
+- `verify_build_pipeline.sh` 会调用该测试，确保编译链路验证时同时检查 TCP 下载协议基础语义。
+- 该服务是桌面测试替身；真实 MCU Ethernet server 仍需要结合具体网络栈和硬件环境实现/验证。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -259,7 +276,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 
 ### 5. Ethernet Runtime server side
 
-Editor 端 TCP transport 已可用，但还需要在 Runtime 侧实现或确认 TCP server，把现有串口下载协议透明承载到 Ethernet。
+Editor 端 TCP transport 已可用，桌面 TiZi TCP runtime server 已覆盖基础协议回归。真实 Runtime 侧仍需要在 MCU 网络栈中实现或确认 TCP server，把现有下载协议承载到 Ethernet，并在硬件上验证擦写、校验、复位与运行控制。
 
 ## 未提交的样例文件
 
