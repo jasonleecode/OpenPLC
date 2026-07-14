@@ -46,25 +46,25 @@ SIM_BIN="$WORK_DIR/sim_program"
 mkdir -p "$OUT_DIR"
 "$MATIEC_DIR/iec2c" -p -i -I "$MATIEC_DIR/lib" -T "$OUT_DIR" "$ST_FILE" > "$WORK_DIR/iec2c.out"
 
-python3 - "$OUT_DIR/POUS.h" "$OUT_DIR/resource1.c" "$SIM_VARS" <<'PY'
+python3 - "$OUT_DIR/POUS.h" "$OUT_DIR/POUS.c" "$OUT_DIR/resource1.c" "$SIM_VARS" <<'PY'
 import re
 import sys
 from pathlib import Path
 
 pous = Path(sys.argv[1]).read_text()
-resource = Path(sys.argv[2]).read_text()
-out = Path(sys.argv[3])
+pous_code = Path(sys.argv[2]).read_text()
+resource = Path(sys.argv[3]).read_text()
+out = Path(sys.argv[4])
 
 instance_match = re.search(r"\b([A-Z][A-Z0-9_]*)\s+(RESOURCE1__[A-Z0-9_]+);", resource)
 if not instance_match:
     raise SystemExit("cannot find RESOURCE1 program instance")
 
 program_type, instance_name = instance_match.groups()
-program_body = None
+structs = {}
 for struct_match in re.finditer(r"typedef struct \{(?P<body>.*?)\}\s*(?P<type>[A-Z][A-Z0-9_]*);", pous, re.S):
-    if struct_match.group("type") == program_type:
-        program_body = struct_match.group("body")
-        break
+    structs[struct_match.group("type")] = struct_match.group("body")
+program_body = structs.get(program_type)
 if program_body is None:
     raise SystemExit(f"cannot find struct for {program_type}")
 
@@ -76,13 +76,67 @@ supported = {
     "LREAL": "SIM_VAR_LREAL",
 }
 
+steps_by_type = {}
+for struct_type in structs:
+    body_match = re.search(rf"\bvoid\s+{re.escape(struct_type)}_body__\s*\(", pous_code)
+    if not body_match:
+        continue
+    init_starts = [
+        match.start()
+        for match in re.finditer(rf"\bvoid\s+{re.escape(struct_type)}_init__\s*\(", pous_code[:body_match.start()])
+    ]
+    if not init_starts:
+        continue
+    segment = pous_code[init_starts[-1]:body_match.start()]
+    steps = [
+        (name, int(index))
+        for name, index in re.findall(r"#define\s+([A-Z][A-Z0-9_]*)\s+__step_list\[(\d+)\]", segment)
+    ]
+    if steps:
+        steps_by_type[struct_type] = steps
+
 entries = []
-for iec_type, name in re.findall(r"__DECLARE_VAR\(([^,]+),([^)]+)\)", program_body):
-    iec_type = iec_type.strip()
-    name = name.strip()
-    sim_type = supported.get(iec_type)
-    if sim_type:
-        entries.append((f"main.{name}", sim_type, f"&{instance_name}.{name}.value"))
+seen = set()
+
+def add_entry(display_name, sim_type, address_expr):
+    if display_name in seen:
+        return
+    seen.add(display_name)
+    entries.append((display_name, sim_type, f"&{address_expr}"))
+
+def add_struct_vars(struct_type, display_prefix, address_prefix, depth=0):
+    if depth > 4:
+        return
+    body = structs.get(struct_type)
+    if not body:
+        return
+
+    for iec_type, name in re.findall(r"__DECLARE_VAR\(([^,]+),([^)]+)\)", body):
+        iec_type = iec_type.strip()
+        name = name.strip()
+        if name in {"EN", "ENO"}:
+            continue
+        sim_type = supported.get(iec_type)
+        if sim_type:
+            add_entry(f"{display_prefix}.{name}", sim_type, f"{address_prefix}.{name}.value")
+
+    for step_name, step_index in steps_by_type.get(struct_type, []):
+        add_entry(
+            f"{display_prefix}.{step_name}.X",
+            "SIM_VAR_BOOL",
+            f"{address_prefix}.__step_list[{step_index}].X.value",
+        )
+
+    for child_type, child_name in re.findall(r"^\s*([A-Z][A-Z0-9_]*)\s+([A-Z][A-Z0-9_]*)\s*;", body, re.M):
+        if child_type in structs:
+            add_struct_vars(
+                child_type,
+                f"{display_prefix}.{child_name}",
+                f"{address_prefix}.{child_name}",
+                depth + 1,
+            )
+
+add_struct_vars(program_type, "main", instance_name)
 
 if not entries:
     raise SystemExit("no supported variables found")
@@ -121,6 +175,7 @@ python3 - "$SIM_BIN" <<'PY'
 import json
 import subprocess
 import sys
+import time
 
 proc = subprocess.Popen(
     [sys.argv[1]],
@@ -151,42 +206,79 @@ hello = request({"cmd": "hello"})
 assert hello["name"] == "TiZi SmartSim"
 assert hello["varCount"] >= 5
 
-request({"cmd": "setTraceVariables", "names": ["main.CU", "main.COUNT"]})
-trace = request({"cmd": "traceData"})
-assert [item["name"] for item in trace["vars"]] == ["main.CU", "main.COUNT"]
-
 request({"cmd": "init"})
-request({"cmd": "writeVar", "name": "main.CU", "value": False})
-request({"cmd": "writeVar", "name": "main.R", "value": False})
-request({"cmd": "step"})
 state = vars_by_name()
-assert state["main.COUNT"]["value"] == 0
-assert state["main.DONE"]["value"] is False
-assert state["main.DONEMIRROR"]["value"] is False
 
-for pulse in range(1, 6):
-    request({"cmd": "writeVar", "name": "main.CU", "value": True})
-    request({"cmd": "step"})
+if "main.TRAFIC_LIGHT_SEQUENCE0.GREEN.X" in state:
+    request({"cmd": "setTraceVariables", "names": [
+        "main.SWITCHBUTTON",
+        "main.TRAFIC_LIGHT_SEQUENCE0.ORANGE.X",
+        "main.TRAFIC_LIGHT_SEQUENCE0.RED.X",
+    ]})
+    trace = request({"cmd": "traceData"})
+    assert [item["name"] for item in trace["vars"]] == [
+        "main.SWITCHBUTTON",
+        "main.TRAFIC_LIGHT_SEQUENCE0.ORANGE.X",
+        "main.TRAFIC_LIGHT_SEQUENCE0.RED.X",
+    ]
+
+    request({"cmd": "forceVar", "name": "main.SWITCHBUTTON", "value": True})
+    saw_orange = False
+    saw_red = False
+    request({"cmd": "start", "intervalMs": 100})
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        time.sleep(0.15)
+        state = vars_by_name()
+        saw_orange = saw_orange or state["main.TRAFIC_LIGHT_SEQUENCE0.ORANGE.X"]["value"]
+        saw_red = saw_red or state["main.TRAFIC_LIGHT_SEQUENCE0.RED.X"]["value"]
+        if saw_orange and saw_red:
+            break
+    request({"cmd": "pause"})
     state = vars_by_name()
-    assert state["main.COUNT"]["value"] == pulse
-    assert state["main.DONE"]["value"] == (pulse >= 5)
-    assert state["main.DONEMIRROR"]["value"] == (pulse >= 5)
+    assert saw_orange
+    assert saw_red
+    assert state["main.REDLIGHT"]["value"] is True
+    assert state["main.TRAFIC_LIGHT_SEQUENCE0.RED.X"]["value"] is True
+    assert state["main.TRAFIC_LIGHT_SEQUENCE0.STOP_CARS"]["value"] is False
+
+    request({"cmd": "releaseForce", "name": "main.SWITCHBUTTON"})
+else:
+    request({"cmd": "setTraceVariables", "names": ["main.CU", "main.COUNT"]})
+    trace = request({"cmd": "traceData"})
+    assert [item["name"] for item in trace["vars"]] == ["main.CU", "main.COUNT"]
 
     request({"cmd": "writeVar", "name": "main.CU", "value": False})
+    request({"cmd": "writeVar", "name": "main.R", "value": False})
     request({"cmd": "step"})
+    state = vars_by_name()
+    assert state["main.COUNT"]["value"] == 0
+    assert state["main.DONE"]["value"] is False
+    assert state["main.DONEMIRROR"]["value"] is False
 
-request({"cmd": "forceVar", "name": "main.CU", "value": True})
-state = vars_by_name()
-assert state["main.CU"]["forced"] is True
-request({"cmd": "releaseForce", "name": "main.CU"})
-state = vars_by_name()
-assert state["main.CU"]["forced"] is False
+    for pulse in range(1, 6):
+        request({"cmd": "writeVar", "name": "main.CU", "value": True})
+        request({"cmd": "step"})
+        state = vars_by_name()
+        assert state["main.COUNT"]["value"] == pulse
+        assert state["main.DONE"]["value"] == (pulse >= 5)
+        assert state["main.DONEMIRROR"]["value"] == (pulse >= 5)
 
-request({"cmd": "writeVar", "name": "main.R", "value": True})
-request({"cmd": "step"})
-state = vars_by_name()
-assert state["main.COUNT"]["value"] == 0
-assert state["main.DONE"]["value"] is False
+        request({"cmd": "writeVar", "name": "main.CU", "value": False})
+        request({"cmd": "step"})
+
+    request({"cmd": "forceVar", "name": "main.CU", "value": True})
+    state = vars_by_name()
+    assert state["main.CU"]["forced"] is True
+    request({"cmd": "releaseForce", "name": "main.CU"})
+    state = vars_by_name()
+    assert state["main.CU"]["forced"] is False
+
+    request({"cmd": "writeVar", "name": "main.R", "value": True})
+    request({"cmd": "step"})
+    state = vars_by_name()
+    assert state["main.COUNT"]["value"] == 0
+    assert state["main.DONE"]["value"] is False
 
 request({"cmd": "stop"})
 proc.wait(timeout=2)

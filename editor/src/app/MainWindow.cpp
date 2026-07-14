@@ -52,7 +52,9 @@
 #include <QEvent>
 #include <QGroupBox>
 #include <QApplication>
+#include <QColor>
 #include <QDrag>
+#include <QMetaType>
 #include <QMimeData>
 
 #include <utility>
@@ -125,6 +127,10 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     menuBar()->setNativeMenuBar(false);
+    m_simDiVars = QStringList(16);
+    m_simDoVars = QStringList(16);
+    m_simAiVars = QStringList(4);
+    m_simAoVars = QStringList(4);
 
     // 初始化 UI 框架
     setupMenuBar();
@@ -967,8 +973,8 @@ void MainWindow::setupLibraryPanel()
     dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable);
 
-    QTabWidget* libTabs = new QTabWidget();
-    libTabs->setObjectName("libraryTabs");
+    m_libraryTabs = new QTabWidget();
+    m_libraryTabs->setObjectName("libraryTabs");
 
     // Library 标签页
     QWidget* libWidget = new QWidget();
@@ -1058,14 +1064,50 @@ void MainWindow::setupLibraryPanel()
     });
 
     libLay->addWidget(m_libraryTree);
-    libTabs->addTab(libWidget, "Library");
-    libTabs->addTab(new QWidget(), "Debugger");
-    libTabs->tabBar()->setExpanding(false);  // 让标签页左对齐
-    libTabs->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    m_libraryTabs->addTab(libWidget, "Library");
 
-    dock->setWidget(libTabs);
+    auto* debuggerWidget = new QWidget;
+    auto* debuggerLayout = new QVBoxLayout(debuggerWidget);
+    debuggerLayout->setContentsMargins(6, 6, 6, 6);
+    debuggerLayout->setSpacing(6);
+
+    m_debuggerTable = new QTableWidget(0, 5, debuggerWidget);
+    m_debuggerTable->setHorizontalHeaderLabels(QStringList() << "Name" << "Type" << "Value" << "Forced" << "Sim I/O");
+    m_debuggerTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_debuggerTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_debuggerTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_debuggerTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_debuggerTable->setAlternatingRowColors(true);
+    m_debuggerTable->verticalHeader()->setVisible(false);
+    m_debuggerTable->verticalHeader()->setDefaultSectionSize(24);
+    m_debuggerTable->horizontalHeader()->setStretchLastSection(false);
+    m_debuggerTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_debuggerTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_debuggerTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_debuggerTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_debuggerTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    connect(m_debuggerTable, &QTableWidget::customContextMenuRequested,
+            this, &MainWindow::showDebuggerContextMenu);
+
+    auto* debuggerActions = new QHBoxLayout;
+    auto* forceButton = new QPushButton("Force");
+    auto* releaseButton = new QPushButton("Release");
+    connect(forceButton, &QPushButton::clicked, this, &MainWindow::forceDebuggerVariable);
+    connect(releaseButton, &QPushButton::clicked, this, &MainWindow::releaseDebuggerVariable);
+    debuggerActions->addWidget(forceButton);
+    debuggerActions->addWidget(releaseButton);
+    debuggerActions->addStretch(1);
+
+    debuggerLayout->addWidget(m_debuggerTable, 1);
+    debuggerLayout->addLayout(debuggerActions);
+    m_libraryTabs->addTab(debuggerWidget, "Debugger");
+    m_libraryTabs->tabBar()->setExpanding(false);  // 让标签页左对齐
+    m_libraryTabs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+
+    dock->setWidget(m_libraryTabs);
     dock->setMinimumWidth(190);
     addDockWidget(Qt::RightDockWidgetArea, dock);
+    resizeDocks({dock}, {320}, Qt::Horizontal);
 }
 
 // ============================================================
@@ -1099,10 +1141,11 @@ void MainWindow::setupConsolePanel()
     m_consoleTabs->addTab(m_consoleEdit, "Console");
 
     // PLC Log
-    auto* logEdit = new QPlainTextEdit();
-    logEdit->setReadOnly(true);
-    logEdit->setFont(QFont("Courier New", 9));
-    m_consoleTabs->addTab(logEdit, "PLC Log");
+    m_plcLogEdit = new QPlainTextEdit();
+    m_plcLogEdit->setReadOnly(true);
+    m_plcLogEdit->setFont(QFont("Courier New", 9));
+    m_plcLogEdit->setMaximumBlockCount(500);
+    m_consoleTabs->addTab(m_plcLogEdit, "PLC Log");
 
     dock->setWidget(m_consoleTabs);
     addDockWidget(Qt::BottomDockWidgetArea, dock);
@@ -1365,6 +1408,11 @@ void MainWindow::openSmartSim()
     m_project->saveToFile(m_project->filePath);
 
     if (m_smartSimWindow) {
+        if (m_libraryTabs && m_debuggerTable)
+            m_libraryTabs->setCurrentWidget(m_debuggerTable->parentWidget());
+        if (m_consoleTabs && m_plcLogEdit)
+            m_consoleTabs->setCurrentWidget(m_plcLogEdit);
+        syncSimIoMappings();
         m_smartSimWindow->show();
         m_smartSimWindow->raise();
         m_smartSimWindow->activateWindow();
@@ -1374,15 +1422,296 @@ void MainWindow::openSmartSim()
     m_smartSimWindow = new SmartSimWidget(m_project);
     m_smartSimWindow->setAttribute(Qt::WA_DeleteOnClose);
     m_smartSimWindow->setWindowTitle("SmartSim - PC PLC Simulation");
-    m_smartSimWindow->resize(1180, 720);
+    m_smartSimWindow->resize(980, 720);
+
+    connect(m_smartSimWindow, &SmartSimWidget::debugValuesChanged,
+            this, &MainWindow::updateDebuggerValues);
+    connect(m_smartSimWindow, &SmartSimWidget::simulationEvent,
+            this, &MainWindow::appendPlcLog);
 
     connect(m_smartSimWindow, &QObject::destroyed, this, [this] {
         m_smartSimWindow = nullptr;
     });
 
+    if (m_libraryTabs && m_debuggerTable)
+        m_libraryTabs->setCurrentWidget(m_debuggerTable->parentWidget());
+    if (m_consoleTabs && m_plcLogEdit)
+        m_consoleTabs->setCurrentWidget(m_plcLogEdit);
+    syncSimIoMappings();
+
     m_smartSimWindow->show();
     m_smartSimWindow->raise();
     m_smartSimWindow->activateWindow();
+}
+
+void MainWindow::updateDebuggerValues(const QVector<SimDebugValue>& vars)
+{
+    if (!m_debuggerTable)
+        return;
+
+    m_lastDebugValues = vars;
+    const QString selected = selectedDebuggerVariable();
+    m_debuggerTable->setRowCount(vars.size());
+
+    int selectedRow = -1;
+    for (int row = 0; row < vars.size(); ++row) {
+        const SimDebugValue& var = vars[row];
+        auto* nameItem = new QTableWidgetItem(var.name);
+        auto* typeItem = new QTableWidgetItem(var.type);
+        auto* valueItem = new QTableWidgetItem(debugValueText(var.value));
+        auto* forcedItem = new QTableWidgetItem(var.forced ? "Yes" : "No");
+        auto* ioItem = new QTableWidgetItem(simIoRoleForVariable(var.name));
+
+        const QList<QTableWidgetItem*> items{nameItem, typeItem, valueItem, forcedItem, ioItem};
+        for (QTableWidgetItem* item : items) {
+            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            item->setToolTip(item->text());
+            if (var.forced)
+                item->setBackground(QColor("#fff4bf"));
+        }
+        typeItem->setTextAlignment(Qt::AlignCenter);
+        valueItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        forcedItem->setTextAlignment(Qt::AlignCenter);
+        ioItem->setTextAlignment(Qt::AlignCenter);
+
+        m_debuggerTable->setItem(row, 0, nameItem);
+        m_debuggerTable->setItem(row, 1, typeItem);
+        m_debuggerTable->setItem(row, 2, valueItem);
+        m_debuggerTable->setItem(row, 3, forcedItem);
+        m_debuggerTable->setItem(row, 4, ioItem);
+
+        if (var.name == selected)
+            selectedRow = row;
+    }
+
+    if (selectedRow >= 0)
+        m_debuggerTable->selectRow(selectedRow);
+    else if (m_debuggerTable->rowCount() > 0 && m_debuggerTable->currentRow() < 0)
+        m_debuggerTable->selectRow(0);
+}
+
+void MainWindow::appendPlcLog(const QString& message)
+{
+    if (!m_plcLogEdit)
+        return;
+
+    m_plcLogEdit->appendPlainText(message);
+    m_plcLogEdit->ensureCursorVisible();
+}
+
+QString MainWindow::selectedDebuggerVariable() const
+{
+    if (!m_debuggerTable)
+        return QString();
+
+    const int row = m_debuggerTable->currentRow();
+    if (row < 0)
+        return QString();
+
+    QTableWidgetItem* item = m_debuggerTable->item(row, 0);
+    return item ? item->text() : QString();
+}
+
+void MainWindow::forceDebuggerVariable()
+{
+    if (!m_smartSimWindow || !m_debuggerTable)
+        return;
+
+    const int row = m_debuggerTable->currentRow();
+    if (row < 0)
+        return;
+
+    QTableWidgetItem* nameItem = m_debuggerTable->item(row, 0);
+    QTableWidgetItem* typeItem = m_debuggerTable->item(row, 1);
+    QTableWidgetItem* valueItem = m_debuggerTable->item(row, 2);
+    if (!nameItem || !typeItem || !valueItem)
+        return;
+
+    const QString selectedName = nameItem->text();
+    const QString selectedType = typeItem->text();
+    const QString selectedValue = valueItem->text();
+
+    bool accepted = false;
+    const QString text = QInputDialog::getText(
+        this,
+        "Force Variable",
+        QString("Force %1 (%2)").arg(selectedName, selectedType),
+        QLineEdit::Normal,
+        selectedValue,
+        &accepted);
+    if (!accepted)
+        return;
+
+    bool parsed = false;
+    const QVariant value = parseDebugForceValue(selectedType, text, &parsed);
+    if (!parsed) {
+        appendPlcLog(QString("Invalid force value for %1.").arg(selectedName));
+        return;
+    }
+
+    const QString requestedName = selectedName;
+    const QString targetName = debuggerForceTarget(requestedName);
+    if (targetName != requestedName) {
+        appendPlcLog(QString("Redirect force %1 -> %2.").arg(requestedName, targetName));
+    }
+
+    m_smartSimWindow->forceVariable(targetName, value);
+}
+
+void MainWindow::releaseDebuggerVariable()
+{
+    if (!m_smartSimWindow)
+        return;
+
+    const QString name = selectedDebuggerVariable();
+    if (name.isEmpty())
+        return;
+
+    const QString targetName = debuggerForceTarget(name);
+    if (targetName != name)
+        appendPlcLog(QString("Redirect release %1 -> %2.").arg(name, targetName));
+
+    m_smartSimWindow->releaseVariable(targetName);
+}
+
+QString MainWindow::debuggerForceTarget(const QString& name) const
+{
+    if (!m_debuggerTable || !name.startsWith("main.") || name.count('.') < 2)
+        return name;
+
+    const QString leaf = name.section('.', -1);
+    const QString normalizedLeaf = QString(leaf).remove('_').toUpper();
+    for (int row = 0; row < m_debuggerTable->rowCount(); ++row) {
+        QTableWidgetItem* item = m_debuggerTable->item(row, 0);
+        if (!item)
+            continue;
+
+        const QString candidate = item->text();
+        if (!candidate.startsWith("main.") || candidate.count('.') != 1)
+            continue;
+
+        const QString candidateLeaf = candidate.section('.', -1);
+        if (QString(candidateLeaf).remove('_').toUpper() == normalizedLeaf)
+            return candidate;
+    }
+
+    return name;
+}
+
+void MainWindow::showDebuggerContextMenu(const QPoint& pos)
+{
+    if (!m_debuggerTable)
+        return;
+
+    const QModelIndex index = m_debuggerTable->indexAt(pos);
+    if (!index.isValid())
+        return;
+
+    m_debuggerTable->selectRow(index.row());
+    const QString name = selectedDebuggerVariable();
+    if (name.isEmpty())
+        return;
+
+    QMenu menu(this);
+    auto addChannelMenu = [this, &menu](const QString& role, int count) {
+        QMenu* channelMenu = menu.addMenu(QString("Add to SmartSim %1").arg(role));
+        for (int i = 0; i < count; ++i) {
+            channelMenu->addAction(QString("%1%2").arg(role).arg(i), this, [this, role, i] {
+                addDebuggerVariableToSimIo(role, i);
+            });
+        }
+    };
+    addChannelMenu("DI", 16);
+    addChannelMenu("DO", 16);
+    addChannelMenu("AI", 4);
+    addChannelMenu("AO", 4);
+    menu.addSeparator();
+    menu.addAction("Remove from SmartSim I/O", this, &MainWindow::removeDebuggerVariableFromSimIo);
+    menu.exec(m_debuggerTable->viewport()->mapToGlobal(pos));
+}
+
+void MainWindow::addDebuggerVariableToSimIo(const QString& role, int index)
+{
+    const QString name = selectedDebuggerVariable();
+    if (name.isEmpty())
+        return;
+
+    auto removeFrom = [&name](QStringList& list) {
+        for (QString& item : list) {
+            if (item == name)
+                item.clear();
+        }
+    };
+    removeFrom(m_simDiVars);
+    removeFrom(m_simDoVars);
+    removeFrom(m_simAiVars);
+    removeFrom(m_simAoVars);
+
+    QStringList* target = nullptr;
+    if (role == "DI")
+        target = &m_simDiVars;
+    else if (role == "DO")
+        target = &m_simDoVars;
+    else if (role == "AI")
+        target = &m_simAiVars;
+    else if (role == "AO")
+        target = &m_simAoVars;
+
+    if (!target || index < 0 || index >= target->size())
+        return;
+
+    (*target)[index] = name;
+
+    appendPlcLog(QString("Mapped %1 to SmartSim %2%3.").arg(name, role).arg(index));
+    syncSimIoMappings();
+    updateDebuggerValues(m_lastDebugValues);
+}
+
+void MainWindow::removeDebuggerVariableFromSimIo()
+{
+    const QString name = selectedDebuggerVariable();
+    if (name.isEmpty())
+        return;
+
+    auto removeFrom = [&name](QStringList& list) {
+        for (QString& item : list) {
+            if (item == name)
+                item.clear();
+        }
+    };
+    removeFrom(m_simDiVars);
+    removeFrom(m_simDoVars);
+    removeFrom(m_simAiVars);
+    removeFrom(m_simAoVars);
+
+    appendPlcLog(QString("Removed %1 from SmartSim I/O.").arg(name));
+    syncSimIoMappings();
+    updateDebuggerValues(m_lastDebugValues);
+}
+
+void MainWindow::syncSimIoMappings()
+{
+    if (!m_smartSimWindow)
+        return;
+
+    m_smartSimWindow->setIoMappings(m_simDiVars, m_simDoVars, m_simAiVars, m_simAoVars);
+}
+
+QString MainWindow::simIoRoleForVariable(const QString& name) const
+{
+    const int di = m_simDiVars.indexOf(name);
+    if (di >= 0)
+        return QString("DI%1").arg(di);
+    const int dout = m_simDoVars.indexOf(name);
+    if (dout >= 0)
+        return QString("DO%1").arg(dout);
+    const int ai = m_simAiVars.indexOf(name);
+    if (ai >= 0)
+        return QString("AI%1").arg(ai);
+    const int ao = m_simAoVars.indexOf(name);
+    if (ao >= 0)
+        return QString("AO%1").arg(ao);
+    return QString();
 }
 
 // ============================================================
@@ -2587,6 +2916,51 @@ QString MainWindow::ledStyle(const QString& color)
         "border-radius: 6px;"
         "border: 1px solid rgba(0,0,0,0.25);"
     ).arg(color);
+}
+
+QString MainWindow::debugValueText(const QVariant& value)
+{
+    if (value.metaType().id() == QMetaType::Bool)
+        return value.toBool() ? "true" : "false";
+    if (value.canConvert<double>())
+        return QString::number(value.toDouble(), 'g', 9);
+    return value.toString();
+}
+
+QVariant MainWindow::parseDebugForceValue(const QString& type, const QString& text, bool* ok)
+{
+    if (ok)
+        *ok = false;
+
+    const QString normalizedType = type.trimmed().toUpper();
+    const QString normalizedText = text.trimmed().toLower();
+    if (normalizedType == "BOOL") {
+        if (normalizedText == "true" || normalizedText == "1" || normalizedText == "on") {
+            if (ok)
+                *ok = true;
+            return true;
+        }
+        if (normalizedText == "false" || normalizedText == "0" || normalizedText == "off") {
+            if (ok)
+                *ok = true;
+            return false;
+        }
+        return {};
+    }
+
+    if (normalizedType == "INT" || normalizedType == "DINT") {
+        bool converted = false;
+        const qlonglong value = text.trimmed().toLongLong(&converted);
+        if (ok)
+            *ok = converted;
+        return converted ? QVariant(value) : QVariant();
+    }
+
+    bool converted = false;
+    const double value = text.trimmed().toDouble(&converted);
+    if (ok)
+        *ok = converted;
+    return converted ? QVariant(value) : QVariant();
 }
 
 void MainWindow::setupStatusBar()

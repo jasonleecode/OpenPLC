@@ -6,15 +6,14 @@
 #include <QVector>
 #include <QWidget>
 
+#include "simdebugsession.h"
+
 class QLabel;
 class ProjectModel;
 class QProcess;
 class QPushButton;
 class QProgressBar;
-class QTableWidget;
-class SimDebugSession;
 class QTimer;
-struct SimDebugValue;
 
 class SmartSimWidget : public QWidget {
     Q_OBJECT
@@ -22,6 +21,18 @@ class SmartSimWidget : public QWidget {
 public:
     explicit SmartSimWidget(ProjectModel* project, QWidget* parent = nullptr);
     ~SmartSimWidget() override;
+
+public slots:
+    void forceVariable(const QString& name, const QVariant& value);
+    void releaseVariable(const QString& name);
+    void setIoMappings(const QStringList& diVars,
+                       const QStringList& doVars,
+                       const QStringList& aiVars,
+                       const QStringList& aoVars);
+
+signals:
+    void debugValuesChanged(const QVector<SimDebugValue>& vars);
+    void simulationEvent(const QString& message);
 
 private:
     enum class RunState {
@@ -34,7 +45,6 @@ private:
     QWidget* createRackPanel();
     QWidget* createDigitalPanel(const QString& title, bool output);
     QWidget* createAnalogPanel(const QString& title, bool output);
-    QWidget* createLogPanel();
 
     bool ensureSimulator();
     bool buildSimulator();
@@ -44,10 +54,6 @@ private:
     void requestVariables();
     void handleRuntimeLine(const QByteArray& line);
     void handleRuntimeVariables(const QVector<SimDebugValue>& vars);
-    void updateWatchTable(const QVector<SimDebugValue>& vars);
-    QString selectedWatchVariable() const;
-    void forceSelectedVariable();
-    void releaseSelectedVariable();
     void stopRuntime();
     void setRunState(RunState state);
     void updateStatusLabels();
@@ -56,8 +62,6 @@ private:
     void appendLog(const QString& message);
     static QString ledStyle(bool on, const QString& onColor);
     static QString stateText(RunState state);
-    static QString valueText(const QVariant& value);
-    static QVariant parseForceValue(const QString& type, const QString& text, bool* ok);
 
     QLabel* m_stateLed = nullptr;
     QLabel* m_stateText = nullptr;
@@ -65,17 +69,19 @@ private:
     QLabel* m_scanText = nullptr;
     QLabel* m_cycleText = nullptr;
     QLabel* m_runtimeText = nullptr;
-    QLabel* m_logText = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_pauseButton = nullptr;
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_stepButton = nullptr;
-    QTableWidget* m_watchTable = nullptr;
 
     QList<QLabel*> m_diLeds;
     QList<QLabel*> m_doLeds;
     QList<QProgressBar*> m_aiBars;
     QList<QProgressBar*> m_aoBars;
+    QStringList m_diVars;
+    QStringList m_doVars;
+    QStringList m_aiVars;
+    QStringList m_aoVars;
 
     QTimer* m_scanTimer = nullptr;
     QTimer* m_pollTimer = nullptr;

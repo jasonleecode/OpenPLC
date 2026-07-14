@@ -6,11 +6,13 @@
 
 #include "../core/models/ProjectModel.h"
 #include "../editor/scene/LadderScene.h"     // EditorMode 枚举
+#include "../sim/simdebugsession.h"
 
 class ProjectManager;
 class QMdiArea;
 class QMdiSubWindow;
 class QTabWidget;
+class QTableWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QPlainTextEdit;
@@ -78,6 +80,17 @@ private:
     void closeAllPouTabs();
     void openProjectProperties();            // 打开项目属性面板（单例）
     void openSmartSim();                     // 打开 PC 仿真面板（单例）
+    void updateDebuggerValues(const QVector<SimDebugValue>& vars);
+    void appendPlcLog(const QString& message);
+    QString selectedDebuggerVariable() const;
+    void forceDebuggerVariable();
+    void releaseDebuggerVariable();
+    QString debuggerForceTarget(const QString& name) const;
+    void showDebuggerContextMenu(const QPoint& pos);
+    void addDebuggerVariableToSimIo(const QString& role, int index);
+    void removeDebuggerVariableFromSimIo();
+    void syncSimIoMappings();
+    QString simIoRoleForVariable(const QString& name) const;
 
     // ---- POU 编辑器工厂 ----
     QWidget* createPouEditorWidget(PouModel* pou);
@@ -102,6 +115,8 @@ private:
     // ---- 工具栏辅助 ----
     static QIcon makeLdIcon(const QString& type, int size = 24);
     void onLdModeChanged(EditorMode mode);
+    static QString debugValueText(const QVariant& value);
+    static QVariant parseDebugForceValue(const QString& type, const QString& text, bool* ok);
 
     // ---- 状态栏辅助 ----
     static QString ledStyle(const QString& color);  // 生成圆形 LED 样式
@@ -116,8 +131,16 @@ private:
     QMdiArea*       m_mdiArea     = nullptr;
     QTreeWidget*    m_projectTree = nullptr;
     QTreeWidget*    m_libraryTree = nullptr;
+    QTabWidget*     m_libraryTabs = nullptr;
+    QTableWidget*   m_debuggerTable = nullptr;
     QTabWidget*     m_consoleTabs = nullptr;
     QPlainTextEdit* m_consoleEdit = nullptr;
+    QPlainTextEdit* m_plcLogEdit = nullptr;
+    QStringList m_simDiVars;
+    QStringList m_simDoVars;
+    QStringList m_simAiVars;
+    QStringList m_simAoVars;
+    QVector<SimDebugValue> m_lastDebugValues;
 
     // ---- PLC 状态 ----
     PlcConnState    m_connState = PlcConnState::Disconnected;

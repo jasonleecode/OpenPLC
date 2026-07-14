@@ -54,7 +54,7 @@ SimVar sim_vars[] = {
 
 下一阶段应扩展到 PLCopen 常见类型，包括 `SINT`、`USINT`、`UINT`、`UDINT`、`LINT`、`ULINT`、`TIME`、`STRING`，并在 UI 层保留完整 IEC 类型信息。
 
-SmartSim 面板当前可以从 runtime 的 `readVars` 回包刷新 DI/DO/AI/AO，并在右侧 Debug Watch 中展示变量名、IEC 类型、当前值和强制状态。Watch 面板已提供 force/release force 入口，但 I/O 分组仍然依赖变量名和类型的启发式判断。后续最好在变量声明或地址绑定里明确 `%IX/%QX/%IW/%QW`，让 UI 能精确区分数字输入、数字输出、模拟输入、模拟输出，而不是通过 `DI/DO/AI/AO`、`Q`、`out` 等命名约定推断。
+SmartSim 面板当前可以从 runtime 的 `readVars` 回包刷新手动分配的 DI/DO/AI/AO，并将变量快照和事件日志上报给主窗口。主窗口右侧 Debugger 面板展示变量名、IEC 类型、当前值、强制状态和 Sim I/O 分配，并提供 force/release force 入口；底部 PLC Log 显示 SmartSim 运行事件。变量表生成已从 program 顶层变量扩展到用户自定义 FB 实例内部基础变量和 SFC step active 位，例如 `main.TRAFIC_LIGHT_SEQUENCE0.GREEN.X`。SmartSim 不再按变量名自动映射 DI/DO/AI/AO，用户需要在 Debugger 变量列表右键选择 Add to SmartSim DI/DO/AI/AO，并指定通道号，例如 `DO0` 到 `DO15`。后续最好在变量声明或地址绑定里明确 `%IX/%QX/%IW/%QW`，让 UI 能提供更准确的默认建议。
 
 ## 运行时协议
 
@@ -135,7 +135,8 @@ SmartSim 面板当前可以从 runtime 的 `readVars` 回包刷新 DI/DO/AI/AO�
 当前已开始加入 Beremiz 风格的 debug 中间层：
 
 - `SimDebugSession`：作为 UI 和 runtime 之间的 DataProducer，消费 runtime JSON 回包，维护运行状态和 trace 变量集合，并向 UI 分发结构化变量值。
-- SmartSim 面板：作为第一类 DataConsumer，使用结构化变量快照刷新 DI/DO/AI/AO 和 Debug Watch，并通过 Debug Watch 调用 force/release force。
+- SmartSim 面板：作为 PLC 外观和运行控制窗口，使用结构化变量快照刷新 DI/DO/AI/AO，并把变量快照与运行事件转发给主窗口。
+- 主窗口 Debugger/PLC Log：作为第一类 DataConsumer，显示变量快照、强制状态和 SmartSim 事件，并通过 Debugger 调用 force/release force。
 - runtime trace 通道：已提供 `setTraceVariables` 和 `traceData` 命令，后续可以把梯形图在线监控、变量观察表和断点条件统一迁移到订阅式 trace。
 
 后续应继续把构建、进程、符号表和 UI 消费者拆开，避免 SmartSim、梯形图在线监控、变量观察表各自维护一套 runtime 通道。

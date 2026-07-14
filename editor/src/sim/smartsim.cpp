@@ -5,8 +5,6 @@
 #include "../core/compiler/StGenerator.h"
 #include "../core/models/ProjectModel.h"
 
-#include <QAbstractItemView>
-#include <QColor>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -15,22 +13,20 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
-#include <QHeaderView>
-#include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
-#include <QLineEdit>
-#include <QMetaType>
+#include <QMap>
 #include <QProgressBar>
 #include <QProcess>
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QRegularExpression>
-#include <QTableWidget>
-#include <QTableWidgetItem>
+#include <QSet>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#include <functional>
 
 namespace {
 constexpr int kDigitalCount = 16;
@@ -139,7 +135,6 @@ SmartSimWidget::SmartSimWidget(ProjectModel* project, QWidget* parent)
     auto* body = new QHBoxLayout;
     body->setSpacing(12);
     body->addWidget(createRackPanel(), 1);
-    body->addWidget(createLogPanel());
     root->addLayout(body, 1);
 
     setRunState(RunState::Stopped);
@@ -151,6 +146,45 @@ SmartSimWidget::SmartSimWidget(ProjectModel* project, QWidget* parent)
 SmartSimWidget::~SmartSimWidget()
 {
     stopRuntime();
+}
+
+void SmartSimWidget::forceVariable(const QString& name, const QVariant& value)
+{
+    if (!m_debugSession || name.isEmpty())
+        return;
+
+    m_debugSession->forceVariable(name, value);
+    appendLog(QString("forced %1.").arg(name));
+    requestVariables();
+}
+
+void SmartSimWidget::releaseVariable(const QString& name)
+{
+    if (!m_debugSession || name.isEmpty())
+        return;
+
+    m_debugSession->releaseVariable(name);
+    appendLog(QString("released force on %1.").arg(name));
+    requestVariables();
+}
+
+void SmartSimWidget::setIoMappings(const QStringList& diVars,
+                                   const QStringList& doVars,
+                                   const QStringList& aiVars,
+                                   const QStringList& aoVars)
+{
+    auto normalized = [](QStringList vars, int size) {
+        while (vars.size() < size)
+            vars.append(QString());
+        while (vars.size() > size)
+            vars.removeLast();
+        return vars;
+    };
+
+    m_diVars = normalized(diVars, m_diLeds.size());
+    m_doVars = normalized(doVars, m_doLeds.size());
+    m_aiVars = normalized(aiVars, m_aiBars.size());
+    m_aoVars = normalized(aoVars, m_aoBars.size());
 }
 
 QWidget* SmartSimWidget::createStatusPanel()
@@ -325,85 +359,6 @@ QWidget* SmartSimWidget::createAnalogPanel(const QString& title, bool output)
     return group;
 }
 
-QWidget* SmartSimWidget::createLogPanel()
-{
-    auto* frame = new QFrame;
-    frame->setMinimumWidth(360);
-    frame->setStyleSheet(
-        "QFrame {"
-        "  background: #f7f9fb;"
-        "  border: 1px solid #b9c0ca;"
-        "  border-radius: 6px;"
-        "}");
-
-    auto* layout = new QVBoxLayout(frame);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(8);
-
-    auto* watchTitle = new QLabel("Debug Watch");
-    watchTitle->setStyleSheet("font-weight: 700; color: #25313f;");
-
-    m_watchTable = new QTableWidget(0, 4, frame);
-    m_watchTable->setHorizontalHeaderLabels(QStringList() << "Name" << "Type" << "Value" << "Forced");
-    m_watchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_watchTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_watchTable->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_watchTable->setAlternatingRowColors(true);
-    m_watchTable->verticalHeader()->setVisible(false);
-    m_watchTable->verticalHeader()->setDefaultSectionSize(24);
-    m_watchTable->horizontalHeader()->setStretchLastSection(false);
-    m_watchTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_watchTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_watchTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    m_watchTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    m_watchTable->setStyleSheet(
-        "QTableWidget {"
-        "  background: #ffffff;"
-        "  border: 1px solid #cbd3dd;"
-        "  gridline-color: #e0e6ee;"
-        "}"
-        "QHeaderView::section {"
-        "  background: #e9eef4;"
-        "  border: 0;"
-        "  border-right: 1px solid #cbd3dd;"
-        "  padding: 4px 6px;"
-        "  font-weight: 700;"
-        "}");
-
-    auto* watchActions = new QHBoxLayout;
-    auto* forceButton = new QPushButton("Force");
-    auto* releaseButton = new QPushButton("Release");
-    connect(forceButton, &QPushButton::clicked,
-            this, &SmartSimWidget::forceSelectedVariable);
-    connect(releaseButton, &QPushButton::clicked,
-            this, &SmartSimWidget::releaseSelectedVariable);
-    watchActions->addWidget(forceButton);
-    watchActions->addWidget(releaseButton);
-    watchActions->addStretch(1);
-
-    auto* logTitle = new QLabel("Simulation Events");
-    logTitle->setStyleSheet("font-weight: 700; color: #25313f;");
-    m_logText = new QLabel;
-    m_logText->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    m_logText->setWordWrap(true);
-    m_logText->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_logText->setStyleSheet(
-        "QLabel {"
-        "  background: #111827;"
-        "  color: #d1d5db;"
-        "  border-radius: 4px;"
-        "  padding: 10px;"
-        "  font-family: monospace;"
-        "}");
-
-    layout->addWidget(watchTitle);
-    layout->addWidget(m_watchTable, 2);
-    layout->addLayout(watchActions);
-    layout->addWidget(logTitle);
-    layout->addWidget(m_logText, 1);
-    return frame;
-}
-
 bool SmartSimWidget::ensureSimulator()
 {
     if (!m_process) {
@@ -543,14 +498,17 @@ bool SmartSimWidget::buildSimulator()
 bool SmartSimWidget::generateSimVars(const QString& outDir, const QString& simVarsFile, QString* error) const
 {
     QFile pousFile(outDir + "/POUS.h");
+    QFile pousCodeFile(outDir + "/POUS.c");
     QFile resourceFile(outDir + "/resource1.c");
     if (!pousFile.open(QFile::ReadOnly | QFile::Text)
+        || !pousCodeFile.open(QFile::ReadOnly | QFile::Text)
         || !resourceFile.open(QFile::ReadOnly | QFile::Text)) {
-        if (error) *error = "cannot read POUS.h or resource1.c";
+        if (error) *error = "cannot read POUS.h, POUS.c or resource1.c";
         return false;
     }
 
     const QString pous = QString::fromUtf8(pousFile.readAll());
+    const QString pousCode = QString::fromUtf8(pousCodeFile.readAll());
     const QString resource = QString::fromUtf8(resourceFile.readAll());
 
     QRegularExpression instanceRe("\\b([A-Z][A-Z0-9_]*)\\s+(RESOURCE1__[A-Z0-9_]+);");
@@ -562,16 +520,14 @@ bool SmartSimWidget::generateSimVars(const QString& outDir, const QString& simVa
 
     const QString programType = instanceMatch.captured(1);
     const QString instanceName = instanceMatch.captured(2);
-    QString programBody;
+    QMap<QString, QString> structBodies;
     QRegularExpression structRe("typedef\\s+struct\\s*\\{([\\s\\S]*?)\\}\\s*([A-Z][A-Z0-9_]*)\\s*;");
     QRegularExpressionMatchIterator structIt = structRe.globalMatch(pous);
     while (structIt.hasNext()) {
         const QRegularExpressionMatch m = structIt.next();
-        if (m.captured(2) == programType) {
-            programBody = m.captured(1);
-            break;
-        }
+        structBodies.insert(m.captured(2), m.captured(1));
     }
+    const QString programBody = structBodies.value(programType);
     if (programBody.isEmpty()) {
         if (error) *error = "cannot find program struct";
         return false;
@@ -585,19 +541,102 @@ bool SmartSimWidget::generateSimVars(const QString& outDir, const QString& simVa
         {"LREAL", "SIM_VAR_LREAL"},
     };
 
-    QStringList entries;
-    QRegularExpression varRe("__DECLARE_VAR\\(([^,]+),([^)]+)\\)");
-    QRegularExpressionMatchIterator it = varRe.globalMatch(programBody);
-    while (it.hasNext()) {
-        const QRegularExpressionMatch m = it.next();
-        const QString iecType = m.captured(1).trimmed();
-        const QString name = m.captured(2).trimmed();
-        const QString simType = supported.value(iecType);
-        if (!simType.isEmpty()) {
-            entries << QString("    {\"main.%1\", %2, &%3.%4.value, 0, 0.0},")
-                .arg(name, simType, instanceName, name);
+    QMap<QString, QList<QPair<QString, int>>> sfcStepsByType;
+    for (auto typeIt = structBodies.cbegin(); typeIt != structBodies.cend(); ++typeIt) {
+        const QString type = typeIt.key();
+        const QRegularExpression bodyStartRe(
+            QString("\\bvoid\\s+%1_body__\\s*\\(").arg(QRegularExpression::escape(type)));
+        const QRegularExpressionMatch bodyStart = bodyStartRe.match(pousCode);
+        if (!bodyStart.hasMatch())
+            continue;
+
+        const QString initAndDefines = pousCode.left(bodyStart.capturedStart());
+        const QRegularExpression initRe(
+            QString("\\bvoid\\s+%1_init__\\s*\\(").arg(QRegularExpression::escape(type)));
+        QRegularExpressionMatchIterator initIt = initRe.globalMatch(initAndDefines);
+        int initStart = -1;
+        while (initIt.hasNext())
+            initStart = initIt.next().capturedStart();
+        if (initStart < 0)
+            continue;
+
+        const QString segment = pousCode.mid(initStart, bodyStart.capturedStart() - initStart);
+        QList<QPair<QString, int>> steps;
+        QRegularExpression stepRe("#define\\s+([A-Z][A-Z0-9_]*)\\s+__step_list\\[(\\d+)\\]");
+        QRegularExpressionMatchIterator stepIt = stepRe.globalMatch(segment);
+        while (stepIt.hasNext()) {
+            const QRegularExpressionMatch m = stepIt.next();
+            steps.append(qMakePair(m.captured(1), m.captured(2).toInt()));
         }
+        if (!steps.isEmpty())
+            sfcStepsByType.insert(type, steps);
     }
+
+    QStringList entries;
+    QSet<QString> seenNames;
+    auto addEntry = [&](const QString& displayName,
+                        const QString& simType,
+                        const QString& addressExpr) {
+        if (seenNames.contains(displayName))
+            return;
+        seenNames.insert(displayName);
+        entries << QString("    {\"%1\", %2, &%3, 0, 0.0},")
+            .arg(displayName, simType, addressExpr);
+    };
+
+    std::function<void(const QString&, const QString&, const QString&, int)> addStructVars;
+    addStructVars = [&](const QString& type,
+                        const QString& displayPrefix,
+                        const QString& addressPrefix,
+                        int depth) {
+        if (depth > 4)
+            return;
+
+        const QString body = structBodies.value(type);
+        if (body.isEmpty())
+            return;
+
+        QRegularExpression varRe("__DECLARE_VAR\\(([^,]+),([^)]+)\\)");
+        QRegularExpressionMatchIterator varIt = varRe.globalMatch(body);
+        while (varIt.hasNext()) {
+            const QRegularExpressionMatch m = varIt.next();
+            const QString iecType = m.captured(1).trimmed();
+            const QString name = m.captured(2).trimmed();
+            if (name == "EN" || name == "ENO")
+                continue;
+
+            const QString simType = supported.value(iecType);
+            if (!simType.isEmpty()) {
+                addEntry(displayPrefix + "." + name,
+                         simType,
+                         addressPrefix + "." + name + ".value");
+            }
+        }
+
+        const QList<QPair<QString, int>> steps = sfcStepsByType.value(type);
+        for (const auto& step : steps) {
+            addEntry(displayPrefix + "." + step.first + ".X",
+                     "SIM_VAR_BOOL",
+                     QString("%1.__step_list[%2].X.value").arg(addressPrefix).arg(step.second));
+        }
+
+        QRegularExpression childFbRe("^\\s*([A-Z][A-Z0-9_]*)\\s+([A-Z][A-Z0-9_]*)\\s*;",
+                                     QRegularExpression::MultilineOption);
+        QRegularExpressionMatchIterator childIt = childFbRe.globalMatch(body);
+        while (childIt.hasNext()) {
+            const QRegularExpressionMatch m = childIt.next();
+            const QString childType = m.captured(1).trimmed();
+            const QString childName = m.captured(2).trimmed();
+            if (!structBodies.contains(childType))
+                continue;
+            addStructVars(childType,
+                          displayPrefix + "." + childName,
+                          addressPrefix + "." + childName,
+                          depth + 1);
+        }
+    };
+
+    addStructVars(programType, "main", instanceName, 0);
 
     if (entries.isEmpty()) {
         if (error) *error = "no supported variables found";
@@ -680,164 +719,55 @@ void SmartSimWidget::handleRuntimeLine(const QByteArray& line)
 
 void SmartSimWidget::handleRuntimeVariables(const QVector<SimDebugValue>& vars)
 {
-    int di = 0;
-    int dout = 0;
-    int ai = 0;
-    int ao = 0;
-
+    QMap<QString, SimDebugValue> values;
     for (const SimDebugValue& var : vars) {
-        const QString name = var.name;
-        const QString type = var.type;
-        const QString lower = name.toLower();
+        values.insert(var.name, var);
+    }
 
-        if (type == "BOOL") {
-            const bool on = var.value.toBool();
-            const bool isOutput = lower.contains(".q") || lower.contains("do")
-                || lower.contains("out") || lower.contains("done");
-            QList<QLabel*>& leds = isOutput ? m_doLeds : m_diLeds;
-            int& index = isOutput ? dout : di;
-            if (index < leds.size())
-                leds[index++]->setStyleSheet(ledStyle(on, isOutput ? "#38bdf8" : "#22c55e"));
-            continue;
+    for (QLabel* led : m_diLeds)
+        led->setStyleSheet(ledStyle(false, "#22c55e"));
+    for (QLabel* led : m_doLeds)
+        led->setStyleSheet(ledStyle(false, "#38bdf8"));
+    for (QProgressBar* bar : m_aiBars)
+        bar->setValue(0);
+    for (QProgressBar* bar : m_aoBars)
+        bar->setValue(0);
+
+    auto setDigital = [&values](const QStringList& mappedVars,
+                                QList<QLabel*>& leds,
+                                const QString& color) {
+        const int count = qMin(mappedVars.size(), leds.size());
+        for (int i = 0; i < count; ++i) {
+            if (mappedVars.at(i).isEmpty())
+                continue;
+            const SimDebugValue var = values.value(mappedVars.at(i));
+            leds[i]->setStyleSheet(SmartSimWidget::ledStyle(var.value.toBool(), color));
         }
+    };
 
-        const bool isAnalogType = type == "INT" || type == "DINT" || type == "REAL" || type == "LREAL";
-        if (!isAnalogType)
-            continue;
-
-        double raw = var.value.toDouble();
-        int scaled = 0;
-        if (raw >= 0.0 && raw <= 10.0)
-            scaled = static_cast<int>(raw * 1000.0);
-        else
-            scaled = static_cast<int>(raw);
-        scaled = qBound(0, scaled, 10000);
-
-        const bool isOutput = lower.contains("ao") || lower.contains("aq") || lower.contains(".q");
-        QList<QProgressBar*>& bars = isOutput ? m_aoBars : m_aiBars;
-        int& index = isOutput ? ao : ai;
-        if (index < bars.size())
-            bars[index++]->setValue(scaled);
-    }
-
-    for (; di < m_diLeds.size(); ++di)
-        m_diLeds[di]->setStyleSheet(ledStyle(false, "#22c55e"));
-    for (; dout < m_doLeds.size(); ++dout)
-        m_doLeds[dout]->setStyleSheet(ledStyle(false, "#38bdf8"));
-    for (; ai < m_aiBars.size(); ++ai)
-        m_aiBars[ai]->setValue(0);
-    for (; ao < m_aoBars.size(); ++ao)
-        m_aoBars[ao]->setValue(0);
-
-    updateWatchTable(vars);
-}
-
-void SmartSimWidget::updateWatchTable(const QVector<SimDebugValue>& vars)
-{
-    if (!m_watchTable)
-        return;
-
-    const QString selected = selectedWatchVariable();
-    m_watchTable->setRowCount(vars.size());
-
-    int row = 0;
-    int selectedRow = -1;
-    for (const SimDebugValue& var : vars) {
-        auto* nameItem = new QTableWidgetItem(var.name);
-        auto* typeItem = new QTableWidgetItem(var.type);
-        auto* valueItem = new QTableWidgetItem(valueText(var.value));
-        auto* forcedItem = new QTableWidgetItem(var.forced ? "Yes" : "No");
-
-        QList<QTableWidgetItem*> items{nameItem, typeItem, valueItem, forcedItem};
-        for (QTableWidgetItem* item : items) {
-            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-            item->setToolTip(item->text());
-            if (var.forced)
-                item->setBackground(QColor("#fff4bf"));
+    auto setAnalog = [&values](const QStringList& mappedVars,
+                               QList<QProgressBar*>& bars) {
+        const int count = qMin(mappedVars.size(), bars.size());
+        for (int i = 0; i < count; ++i) {
+            if (mappedVars.at(i).isEmpty())
+                continue;
+            const SimDebugValue var = values.value(mappedVars.at(i));
+            double raw = var.value.toDouble();
+            int scaled = 0;
+            if (raw >= 0.0 && raw <= 10.0)
+                scaled = static_cast<int>(raw * 1000.0);
+            else
+                scaled = static_cast<int>(raw);
+            bars[i]->setValue(qBound(0, scaled, 10000));
         }
-        typeItem->setTextAlignment(Qt::AlignCenter);
-        valueItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        forcedItem->setTextAlignment(Qt::AlignCenter);
+    };
 
-        m_watchTable->setItem(row, 0, nameItem);
-        m_watchTable->setItem(row, 1, typeItem);
-        m_watchTable->setItem(row, 2, valueItem);
-        m_watchTable->setItem(row, 3, forcedItem);
+    setDigital(m_diVars, m_diLeds, "#22c55e");
+    setDigital(m_doVars, m_doLeds, "#38bdf8");
+    setAnalog(m_aiVars, m_aiBars);
+    setAnalog(m_aoVars, m_aoBars);
 
-        if (var.name == selected)
-            selectedRow = row;
-        ++row;
-    }
-
-    if (selectedRow >= 0)
-        m_watchTable->selectRow(selectedRow);
-    else if (m_watchTable->rowCount() > 0 && m_watchTable->currentRow() < 0)
-        m_watchTable->selectRow(0);
-}
-
-QString SmartSimWidget::selectedWatchVariable() const
-{
-    if (!m_watchTable)
-        return QString();
-
-    const int row = m_watchTable->currentRow();
-    if (row < 0)
-        return QString();
-
-    QTableWidgetItem* item = m_watchTable->item(row, 0);
-    return item ? item->text() : QString();
-}
-
-void SmartSimWidget::forceSelectedVariable()
-{
-    if (!m_debugSession || !m_watchTable)
-        return;
-
-    const int row = m_watchTable->currentRow();
-    if (row < 0)
-        return;
-
-    QTableWidgetItem* nameItem = m_watchTable->item(row, 0);
-    QTableWidgetItem* typeItem = m_watchTable->item(row, 1);
-    QTableWidgetItem* valueItem = m_watchTable->item(row, 2);
-    if (!nameItem || !typeItem || !valueItem)
-        return;
-
-    bool accepted = false;
-    const QString text = QInputDialog::getText(
-        this,
-        "Force Variable",
-        QString("Force %1 (%2)").arg(nameItem->text(), typeItem->text()),
-        QLineEdit::Normal,
-        valueItem->text(),
-        &accepted);
-    if (!accepted)
-        return;
-
-    bool parsed = false;
-    const QVariant value = parseForceValue(typeItem->text(), text, &parsed);
-    if (!parsed) {
-        appendLog(QString("invalid force value for %1.").arg(nameItem->text()));
-        return;
-    }
-
-    m_debugSession->forceVariable(nameItem->text(), value);
-    appendLog(QString("forced %1 = %2.").arg(nameItem->text(), valueText(value)));
-    requestVariables();
-}
-
-void SmartSimWidget::releaseSelectedVariable()
-{
-    if (!m_debugSession)
-        return;
-
-    const QString name = selectedWatchVariable();
-    if (name.isEmpty())
-        return;
-
-    m_debugSession->releaseVariable(name);
-    appendLog(QString("released force on %1.").arg(name));
-    requestVariables();
+    emit debugValuesChanged(vars);
 }
 
 void SmartSimWidget::stopRuntime()
@@ -911,12 +841,7 @@ void SmartSimWidget::appendLog(const QString& message)
     const QString line = QString("[%1] %2")
         .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
         .arg(message);
-
-    QStringList lines = m_logText->text().split('\n', Qt::SkipEmptyParts);
-    lines.prepend(line);
-    while (lines.size() > 12)
-        lines.removeLast();
-    m_logText->setText(lines.join('\n'));
+    emit simulationEvent(line);
 }
 
 QString SmartSimWidget::ledStyle(bool on, const QString& onColor)
@@ -939,49 +864,4 @@ QString SmartSimWidget::stateText(RunState state)
     case RunState::Paused: return "Paused";
     }
     return "Unknown";
-}
-
-QString SmartSimWidget::valueText(const QVariant& value)
-{
-    if (value.metaType().id() == QMetaType::Bool)
-        return value.toBool() ? "true" : "false";
-    if (value.canConvert<double>())
-        return QString::number(value.toDouble(), 'g', 9);
-    return value.toString();
-}
-
-QVariant SmartSimWidget::parseForceValue(const QString& type, const QString& text, bool* ok)
-{
-    if (ok)
-        *ok = false;
-
-    const QString normalizedType = type.trimmed().toUpper();
-    const QString normalizedText = text.trimmed().toLower();
-    if (normalizedType == "BOOL") {
-        if (normalizedText == "true" || normalizedText == "1" || normalizedText == "on") {
-            if (ok)
-                *ok = true;
-            return true;
-        }
-        if (normalizedText == "false" || normalizedText == "0" || normalizedText == "off") {
-            if (ok)
-                *ok = true;
-            return false;
-        }
-        return {};
-    }
-
-    if (normalizedType == "INT" || normalizedType == "DINT") {
-        bool converted = false;
-        const qlonglong value = text.trimmed().toLongLong(&converted);
-        if (ok)
-            *ok = converted;
-        return converted ? QVariant(value) : QVariant();
-    }
-
-    bool converted = false;
-    const double value = text.trimmed().toDouble(&converted);
-    if (ok)
-        *ok = converted;
-    return converted ? QVariant(value) : QVariant();
 }
