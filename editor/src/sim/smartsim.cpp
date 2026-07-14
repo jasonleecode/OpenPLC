@@ -7,6 +7,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QFrame>
@@ -17,12 +18,14 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QMap>
+#include <QMouseEvent>
 #include <QProgressBar>
 #include <QProcess>
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSizePolicy>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -35,7 +38,7 @@ constexpr int kAnalogCount = 4;
 QLabel* makeValueLabel(const QString& text)
 {
     auto* label = new QLabel(text);
-    label->setMinimumWidth(92);
+    label->setMinimumWidth(78);
     label->setAlignment(Qt::AlignCenter);
     label->setStyleSheet(
         "QLabel {"
@@ -43,7 +46,7 @@ QLabel* makeValueLabel(const QString& text)
         "  border-radius: 4px;"
         "  background: #f4f6f8;"
         "  color: #1f2933;"
-        "  padding: 4px 8px;"
+        "  padding: 3px 6px;"
         "  font-weight: 600;"
         "}");
     return label;
@@ -52,7 +55,7 @@ QLabel* makeValueLabel(const QString& text)
 QLabel* makeLed()
 {
     auto* led = new QLabel;
-    led->setFixedSize(18, 18);
+    led->setFixedSize(14, 14);
     return led;
 }
 
@@ -62,14 +65,14 @@ QString moduleStyle()
         "QGroupBox {"
         "  border: 1px solid #aeb7c2;"
         "  border-radius: 6px;"
-        "  margin-top: 18px;"
+        "  margin-top: 14px;"
         "  background: #eef2f6;"
         "  font-weight: 700;"
         "}"
         "QGroupBox::title {"
         "  subcontrol-origin: margin;"
-        "  left: 10px;"
-        "  padding: 0 4px;"
+        "  left: 8px;"
+        "  padding: 0 3px;"
         "  color: #25313f;"
         "}");
 }
@@ -80,10 +83,10 @@ SmartSimWidget::SmartSimWidget(ProjectModel* project, QWidget* parent)
     , m_project(project)
 {
     setObjectName("smartSimWidget");
-    setMinimumSize(980, 620);
+    setMinimumSize(760, 500);
     setStyleSheet(
         "#smartSimWidget { background: #dfe5ec; }"
-        "QPushButton { padding: 6px 12px; min-width: 72px; }"
+        "QPushButton { padding: 5px 9px; min-width: 56px; }"
         "QProgressBar {"
         "  border: 1px solid #aeb7c2;"
         "  border-radius: 4px;"
@@ -108,6 +111,7 @@ SmartSimWidget::SmartSimWidget(ProjectModel* project, QWidget* parent)
     connect(m_debugSession, &SimDebugSession::runtimeHello, this,
             [this](const QString& name, int, int) {
         appendLog(name + " connected.");
+        emit simulationConnectionChanged(true);
     });
     connect(m_debugSession, &SimDebugSession::runtimeError, this,
             [this](const QString& message) {
@@ -127,13 +131,13 @@ SmartSimWidget::SmartSimWidget(ProjectModel* project, QWidget* parent)
             [this] { setRunState(RunState::Stopped); });
 
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(16, 16, 16, 16);
-    root->setSpacing(12);
+    root->setContentsMargins(10, 10, 10, 10);
+    root->setSpacing(8);
 
     root->addWidget(createStatusPanel());
 
     auto* body = new QHBoxLayout;
-    body->setSpacing(12);
+    body->setSpacing(8);
     body->addWidget(createRackPanel(), 1);
     root->addLayout(body, 1);
 
@@ -146,6 +150,66 @@ SmartSimWidget::SmartSimWidget(ProjectModel* project, QWidget* parent)
 SmartSimWidget::~SmartSimWidget()
 {
     stopRuntime();
+    emit simulationConnectionChanged(false);
+}
+
+bool SmartSimWidget::downloadProgram()
+{
+    if (!m_project || m_project->filePath.isEmpty()) {
+        appendLog("project must be saved before downloading to SmartSim.");
+        return false;
+    }
+
+    stopRuntime();
+    m_programLoaded = false;
+    m_simBinary.clear();
+    if (m_programText)
+        m_programText->setText("Program: <none>");
+    setRunState(RunState::Stopped);
+    m_tick = 0;
+    m_scanTimeUs = 0;
+    updateStatusLabels();
+
+    appendLog("downloading project to SmartSim...");
+    if (!buildSimulator())
+        return false;
+
+    m_programLoaded = true;
+    if (m_programText) {
+        QString programName = m_project->projectName.trimmed();
+        if (programName.isEmpty())
+            programName = QFileInfo(m_project->filePath).completeBaseName();
+        m_programText->setText("Program: " + programName);
+    }
+    appendLog("program downloaded to SmartSim.");
+    if (!startRuntimeProcess())
+        return false;
+
+    setRunState(RunState::Stopped);
+    requestVariables();
+    return true;
+}
+
+bool SmartSimWidget::runProgram()
+{
+    if (!ensureSimulator())
+        return false;
+
+    sendCommand(QJsonObject{{"cmd", "start"}, {"intervalMs", m_cycleMs}});
+    setRunState(RunState::Running);
+    m_pollTimer->start();
+    appendLog("PLC runtime started.");
+    return true;
+}
+
+void SmartSimWidget::stopProgram()
+{
+    stopRuntime();
+    setRunState(RunState::Stopped);
+    m_tick = 0;
+    m_scanTimeUs = 0;
+    updateStatusLabels();
+    appendLog("PLC runtime stopped.");
 }
 
 void SmartSimWidget::forceVariable(const QString& name, const QVariant& value)
@@ -199,8 +263,8 @@ QWidget* SmartSimWidget::createStatusPanel()
         "}");
 
     auto* layout = new QHBoxLayout(frame);
-    layout->setContentsMargins(12, 10, 12, 10);
-    layout->setSpacing(12);
+    layout->setContentsMargins(8, 6, 8, 6);
+    layout->setSpacing(7);
 
     m_stateLed = makeLed();
     m_stateText = makeValueLabel("STOPPED");
@@ -212,7 +276,7 @@ QWidget* SmartSimWidget::createStatusPanel()
     layout->addWidget(new QLabel("PLC"));
     layout->addWidget(m_stateLed);
     layout->addWidget(m_stateText);
-    layout->addSpacing(10);
+    layout->addSpacing(4);
     layout->addWidget(m_tickText);
     layout->addWidget(m_scanText);
     layout->addWidget(m_cycleText);
@@ -223,32 +287,22 @@ QWidget* SmartSimWidget::createStatusPanel()
     m_pauseButton = new QPushButton("Pause");
     m_stopButton = new QPushButton("Stop");
     m_stepButton = new QPushButton("Step");
+    for (QPushButton* button : {m_startButton, m_pauseButton, m_stopButton, m_stepButton}) {
+        button->setFixedWidth(36);
+        button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    }
     layout->addWidget(m_startButton);
     layout->addWidget(m_pauseButton);
     layout->addWidget(m_stopButton);
     layout->addWidget(m_stepButton);
 
-    connect(m_startButton, &QPushButton::clicked, this, [this] {
-        if (!ensureSimulator())
-            return;
-        sendCommand(QJsonObject{{"cmd", "start"}, {"intervalMs", m_cycleMs}});
-        setRunState(RunState::Running);
-        m_pollTimer->start();
-        appendLog("PLC runtime started.");
-    });
+    connect(m_startButton, &QPushButton::clicked, this, &SmartSimWidget::runProgram);
     connect(m_pauseButton, &QPushButton::clicked, this, [this] {
         sendCommand(QJsonObject{{"cmd", "pause"}});
         setRunState(RunState::Paused);
         appendLog("PLC runtime paused.");
     });
-    connect(m_stopButton, &QPushButton::clicked, this, [this] {
-        stopRuntime();
-        setRunState(RunState::Stopped);
-        m_tick = 0;
-        m_scanTimeUs = 0;
-        updateStatusLabels();
-        appendLog("PLC runtime stopped.");
-    });
+    connect(m_stopButton, &QPushButton::clicked, this, &SmartSimWidget::stopProgram);
     connect(m_stepButton, &QPushButton::clicked, this, [this] {
         if (!ensureSimulator())
             return;
@@ -272,14 +326,15 @@ QWidget* SmartSimWidget::createRackPanel()
         "}");
 
     auto* layout = new QGridLayout(frame);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setHorizontalSpacing(12);
-    layout->setVerticalSpacing(12);
+    layout->setContentsMargins(8, 8, 8, 8);
+    layout->setHorizontalSpacing(8);
+    layout->setVerticalSpacing(8);
 
     auto* cpu = new QGroupBox("CPU");
     cpu->setStyleSheet(moduleStyle());
     auto* cpuLayout = new QVBoxLayout(cpu);
-    cpuLayout->setSpacing(10);
+    cpuLayout->setContentsMargins(8, 12, 8, 8);
+    cpuLayout->setSpacing(6);
 
     auto* cpuTitle = new QLabel("TiZi PLC");
     cpuTitle->setAlignment(Qt::AlignCenter);
@@ -288,13 +343,16 @@ QWidget* SmartSimWidget::createRackPanel()
         "  background: #25313f;"
         "  color: white;"
         "  border-radius: 4px;"
-        "  padding: 10px;"
-        "  font-size: 18px;"
+        "  padding: 7px;"
+        "  font-size: 15px;"
         "  font-weight: 700;"
         "}");
     cpuLayout->addWidget(cpuTitle);
     cpuLayout->addWidget(new QLabel("Mode: PC simulation"));
     cpuLayout->addWidget(new QLabel("Runtime: SmartSim MVP"));
+    m_programText = new QLabel("Program: <none>");
+    m_programText->setWordWrap(true);
+    cpuLayout->addWidget(m_programText);
     cpuLayout->addWidget(new QLabel("Backplane: local process"));
     cpuLayout->addStretch();
 
@@ -317,15 +375,27 @@ QWidget* SmartSimWidget::createDigitalPanel(const QString& title, bool output)
     auto* group = new QGroupBox(title);
     group->setStyleSheet(moduleStyle());
     auto* grid = new QGridLayout(group);
-    grid->setContentsMargins(12, 16, 12, 12);
-    grid->setHorizontalSpacing(8);
-    grid->setVerticalSpacing(8);
+    grid->setContentsMargins(8, 12, 8, 8);
+    grid->setHorizontalSpacing(5);
+    grid->setVerticalSpacing(5);
 
     QList<QLabel*>& leds = output ? m_doLeds : m_diLeds;
     for (int i = 0; i < kDigitalCount; ++i) {
-        auto* name = new QLabel(QString("%1%2").arg(output ? "Q" : "I").arg(i, 2, 10, QLatin1Char('0')));
+        auto* name = new QLabel(QString("%1%2").arg(output ? "Q" : "I").arg(i));
         name->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        name->setMinimumWidth(16);
         auto* led = makeLed();
+        if (!output) {
+            const QString tooltip = QString("Click to toggle DI%1 force value").arg(i);
+            name->setCursor(Qt::PointingHandCursor);
+            led->setCursor(Qt::PointingHandCursor);
+            name->setToolTip(tooltip);
+            led->setToolTip(tooltip);
+            name->setProperty("simDiIndex", i);
+            led->setProperty("simDiIndex", i);
+            name->installEventFilter(this);
+            led->installEventFilter(this);
+        }
         leds.append(led);
 
         const int row = i % 8;
@@ -341,9 +411,9 @@ QWidget* SmartSimWidget::createAnalogPanel(const QString& title, bool output)
     auto* group = new QGroupBox(title);
     group->setStyleSheet(moduleStyle());
     auto* layout = new QGridLayout(group);
-    layout->setContentsMargins(12, 16, 12, 12);
-    layout->setHorizontalSpacing(8);
-    layout->setVerticalSpacing(10);
+    layout->setContentsMargins(8, 12, 8, 8);
+    layout->setHorizontalSpacing(5);
+    layout->setVerticalSpacing(5);
 
     QList<QProgressBar*>& bars = output ? m_aoBars : m_aiBars;
     for (int i = 0; i < kAnalogCount; ++i) {
@@ -351,7 +421,7 @@ QWidget* SmartSimWidget::createAnalogPanel(const QString& title, bool output)
         auto* bar = new QProgressBar;
         bar->setRange(0, 10000);
         bar->setFormat("%v mV");
-        bar->setMinimumWidth(180);
+        bar->setMinimumWidth(120);
         bars.append(bar);
         layout->addWidget(name, i, 0);
         layout->addWidget(bar, i, 1);
@@ -360,6 +430,21 @@ QWidget* SmartSimWidget::createAnalogPanel(const QString& title, bool output)
 }
 
 bool SmartSimWidget::ensureSimulator()
+{
+    if (!m_programLoaded || m_simBinary.isEmpty()) {
+        appendLog("no program downloaded to SmartSim. Connect, then use Download first.");
+        return false;
+    }
+    if (!QFileInfo::exists(m_simBinary)) {
+        appendLog("downloaded SmartSim program is missing. Download again.");
+        m_programLoaded = false;
+        return false;
+    }
+
+    return startRuntimeProcess();
+}
+
+bool SmartSimWidget::startRuntimeProcess()
 {
     if (!m_process) {
         m_process = new QProcess(this);
@@ -380,16 +465,12 @@ bool SmartSimWidget::ensureSimulator()
             m_pollTimer->stop();
             m_scanTimer->stop();
             setRunState(RunState::Stopped);
+            emit simulationConnectionChanged(false);
         });
     }
 
     if (m_process->state() == QProcess::Running)
         return true;
-
-    if (m_simBinary.isEmpty() || !QFileInfo::exists(m_simBinary)) {
-        if (!buildSimulator())
-            return false;
-    }
 
     m_process->start(m_simBinary);
     if (!m_process->waitForStarted(5000)) {
@@ -723,6 +804,7 @@ void SmartSimWidget::handleRuntimeVariables(const QVector<SimDebugValue>& vars)
     for (const SimDebugValue& var : vars) {
         values.insert(var.name, var);
     }
+    m_lastValues = values;
 
     for (QLabel* led : m_diLeds)
         led->setStyleSheet(ledStyle(false, "#22c55e"));
@@ -795,6 +877,7 @@ void SmartSimWidget::setRunState(RunState state)
     m_stopButton->setEnabled(m_state != RunState::Stopped);
     m_stepButton->setEnabled(m_state != RunState::Running);
     updateStatusLabels();
+    emit simulationRunStateChanged(stateText(m_state));
 }
 
 void SmartSimWidget::updateStatusLabels()
@@ -842,6 +925,51 @@ void SmartSimWidget::appendLog(const QString& message)
         .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
         .arg(message);
     emit simulationEvent(line);
+}
+
+bool SmartSimWidget::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::MouseButtonRelease) {
+        const QVariant indexValue = watched->property("simDiIndex");
+        if (indexValue.isValid()) {
+            auto* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                toggleDigitalInput(indexValue.toInt());
+                return true;
+            }
+        }
+    }
+
+    return QWidget::eventFilter(watched, event);
+}
+
+void SmartSimWidget::toggleDigitalInput(int index)
+{
+    if (index < 0 || index >= m_diVars.size())
+        return;
+
+    const QString name = m_diVars.at(index);
+    if (name.isEmpty()) {
+        appendLog(QString("DI%1 is not mapped to a variable.").arg(index));
+        return;
+    }
+    if (!m_debugSession) {
+        appendLog("SmartSim debug session is not ready.");
+        return;
+    }
+    if (!m_process || m_process->state() != QProcess::Running) {
+        appendLog("SmartSim program is not loaded. Download first.");
+        return;
+    }
+
+    const SimDebugValue var = m_lastValues.value(name);
+    const bool nextValue = !var.value.toBool();
+    m_debugSession->forceVariable(name, nextValue);
+    appendLog(QString("DI%1 forced %2 = %3.")
+                  .arg(index)
+                  .arg(name)
+                  .arg(nextValue ? "TRUE" : "FALSE"));
+    requestVariables();
 }
 
 QString SmartSimWidget::ledStyle(bool on, const QString& onColor)

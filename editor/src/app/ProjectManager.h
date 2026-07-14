@@ -1,6 +1,7 @@
 #pragma once
 #include <QObject>
 #include <QMap>
+#include <QString>
 
 class ProjectModel;
 class PouModel;
@@ -30,6 +31,7 @@ public:
     // ── 项目操作 ──────────────────────────────────────────────────
     void newProject();
     void openProject();
+    bool openProject(const QString& path);
     void saveProject();
     void saveProjectAs();
 

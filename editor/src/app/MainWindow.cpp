@@ -56,6 +56,7 @@
 #include <QDrag>
 #include <QMetaType>
 #include <QMimeData>
+#include <QSettings>
 
 #include <utility>
 
@@ -74,6 +75,9 @@
 
 // ============================================================
 namespace {
+constexpr int kMaxRecentProjects = 10;
+constexpr const char* kRecentProjectsKey = "recentProjects";
+
 class ComboBoxDelegate final : public QStyledItemDelegate {
 public:
     explicit ComboBoxDelegate(QStringList values, QObject* parent = nullptr)
@@ -206,6 +210,8 @@ void MainWindow::setupMenuBar()
     QMenu* fileMenu = menuBar()->addMenu("File(&F)");
     fileMenu->addAction("New Project",    this, &MainWindow::newProject);
     fileMenu->addAction("Open Project...", this, &MainWindow::openProject);
+    m_recentProjectsMenu = fileMenu->addMenu("Open Recent");
+    updateRecentProjectsMenu();
     fileMenu->addAction("Save",           this, &MainWindow::saveProject);
     fileMenu->addAction("Save As...",     this, &MainWindow::saveProjectAs);
     fileMenu->addSeparator();
@@ -759,6 +765,18 @@ void MainWindow::setupToolBar()
         if (m_connState != PlcConnState::Connected) {
             statusBar()->showMessage("Not connected to PLC.", 3000); return;
         }
+        if (m_plcUri == "SIM://SmartSim") {
+            if (!m_smartSimWindow) {
+                statusBar()->showMessage("SmartSim is not open.", 3000);
+                return;
+            }
+            if (!m_smartSimWindow->runProgram()) {
+                statusBar()->showMessage("SmartSim run failed. Download a program first.", 5000);
+                return;
+            }
+            statusBar()->showMessage("SmartSim running.", 2000);
+            return;
+        }
         setPlcRunState(PlcRunState::Running);
         statusBar()->showMessage("PLC running.", 2000);
     });
@@ -766,15 +784,24 @@ void MainWindow::setupToolBar()
         if (m_connState != PlcConnState::Connected) {
             statusBar()->showMessage("Not connected to PLC.", 3000); return;
         }
+        if (m_plcUri == "SIM://SmartSim") {
+            if (!m_smartSimWindow) {
+                statusBar()->showMessage("SmartSim is not open.", 3000);
+                return;
+            }
+            m_smartSimWindow->stopProgram();
+            statusBar()->showMessage("SmartSim stopped.", 2000);
+            return;
+        }
         setPlcRunState(PlcRunState::Stopped);
         statusBar()->showMessage("PLC stopped.", 2000);
     });
 
     m_aConnect->setShortcut(QKeySequence("Ctrl+D"));
-    // 初始状态：Run/Stop 需要已连接；Transfer 下载对话框随时可用
+    // 初始状态：Run/Stop/Transfer 需要已连接
     m_aRun->setEnabled(false);
     m_aStop->setEnabled(false);
-    m_aTransfer->setEnabled(true);
+    m_aTransfer->setEnabled(false);
     tb->addSeparator();
 
     // ══════════════════════════════════════════════════════════
@@ -1421,15 +1448,46 @@ void MainWindow::openSmartSim()
 
     m_smartSimWindow = new SmartSimWidget(m_project);
     m_smartSimWindow->setAttribute(Qt::WA_DeleteOnClose);
+    m_smartSimWindow->setWindowFlag(Qt::WindowMaximizeButtonHint, false);
     m_smartSimWindow->setWindowTitle("SmartSim - PC PLC Simulation");
-    m_smartSimWindow->resize(980, 720);
+    m_smartSimWindow->setFixedSize(820, 560);
 
     connect(m_smartSimWindow, &SmartSimWidget::debugValuesChanged,
             this, &MainWindow::updateDebuggerValues);
     connect(m_smartSimWindow, &SmartSimWidget::simulationEvent,
             this, &MainWindow::appendPlcLog);
+    connect(m_smartSimWindow, &SmartSimWidget::simulationConnectionChanged,
+            this, [this](bool connected) {
+        if (connected) {
+            m_plcUri = "SIM://SmartSim";
+            setPlcConnState(PlcConnState::Connected);
+            setPlcRunState(PlcRunState::Stopped);
+            statusBar()->showMessage("Connected to SmartSim.", 3000);
+        } else if (m_plcUri == "SIM://SmartSim") {
+            m_plcUri.clear();
+            setPlcConnState(PlcConnState::Disconnected);
+            setPlcRunState(PlcRunState::Unknown);
+            statusBar()->showMessage("SmartSim disconnected.", 3000);
+        }
+    });
+    connect(m_smartSimWindow, &SmartSimWidget::simulationRunStateChanged,
+            this, [this](const QString& state) {
+        if (m_plcUri != "SIM://SmartSim")
+            return;
+        if (state == "Running")
+            setPlcRunState(PlcRunState::Running);
+        else if (state == "Paused")
+            setPlcRunState(PlcRunState::Paused);
+        else if (state == "Stopped")
+            setPlcRunState(PlcRunState::Stopped);
+    });
 
     connect(m_smartSimWindow, &QObject::destroyed, this, [this] {
+        if (m_plcUri == "SIM://SmartSim") {
+            m_plcUri.clear();
+            setPlcConnState(PlcConnState::Disconnected);
+            setPlcRunState(PlcRunState::Unknown);
+        }
         m_smartSimWindow = nullptr;
     });
 
@@ -2178,9 +2236,108 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
 // 项目操作（委托给 ProjectManager）
 // ============================================================
 void MainWindow::newProject()    { m_projectManager->newProject(); }
-void MainWindow::openProject()   { m_projectManager->openProject(); }
-void MainWindow::saveProject()   { m_projectManager->saveProject(); }
-void MainWindow::saveProjectAs() { m_projectManager->saveProjectAs(); }
+void MainWindow::openProject()
+{
+    const QString before = m_project ? m_project->filePath : QString();
+    m_projectManager->openProject();
+    if (m_project && !m_project->filePath.isEmpty() && m_project->filePath != before)
+        addRecentProject(m_project->filePath);
+}
+
+void MainWindow::openRecentProject(const QString& path)
+{
+    const QFileInfo fi(path);
+    if (!fi.exists()) {
+        QMessageBox::warning(this, "Open Recent",
+                             QString("Project file no longer exists:\n%1").arg(path));
+        removeRecentProject(path);
+        return;
+    }
+
+    if (m_projectManager->openProject(fi.absoluteFilePath()))
+        addRecentProject(fi.absoluteFilePath());
+}
+
+void MainWindow::saveProject()
+{
+    m_projectManager->saveProject();
+    if (m_project && !m_project->filePath.isEmpty())
+        addRecentProject(m_project->filePath);
+}
+
+void MainWindow::saveProjectAs()
+{
+    const QString before = m_project ? m_project->filePath : QString();
+    m_projectManager->saveProjectAs();
+    if (m_project && !m_project->filePath.isEmpty() && m_project->filePath != before)
+        addRecentProject(m_project->filePath);
+}
+
+QStringList MainWindow::recentProjectPaths() const
+{
+    QSettings settings;
+    return settings.value(kRecentProjectsKey).toStringList();
+}
+
+void MainWindow::addRecentProject(const QString& path)
+{
+    const QFileInfo fi(path);
+    if (!fi.exists())
+        return;
+
+    const QString normalized = fi.absoluteFilePath();
+    QStringList paths = recentProjectPaths();
+    paths.removeAll(normalized);
+    paths.prepend(normalized);
+    while (paths.size() > kMaxRecentProjects)
+        paths.removeLast();
+
+    QSettings settings;
+    settings.setValue(kRecentProjectsKey, paths);
+    updateRecentProjectsMenu();
+}
+
+void MainWindow::removeRecentProject(const QString& path)
+{
+    QStringList paths = recentProjectPaths();
+    paths.removeAll(QFileInfo(path).absoluteFilePath());
+    paths.removeAll(path);
+
+    QSettings settings;
+    settings.setValue(kRecentProjectsKey, paths);
+    updateRecentProjectsMenu();
+}
+
+void MainWindow::updateRecentProjectsMenu()
+{
+    if (!m_recentProjectsMenu)
+        return;
+
+    m_recentProjectsMenu->clear();
+    const QStringList paths = recentProjectPaths();
+    if (paths.isEmpty()) {
+        QAction* emptyAction = m_recentProjectsMenu->addAction("(No Recent Projects)");
+        emptyAction->setEnabled(false);
+        return;
+    }
+
+    for (const QString& path : paths) {
+        const QFileInfo fi(path);
+        QAction* action = m_recentProjectsMenu->addAction(fi.fileName());
+        action->setToolTip(path);
+        action->setData(path);
+        connect(action, &QAction::triggered, this, [this, path] {
+            openRecentProject(path);
+        });
+    }
+
+    m_recentProjectsMenu->addSeparator();
+    m_recentProjectsMenu->addAction("Clear Recent Projects", this, [this] {
+        QSettings settings;
+        settings.remove(kRecentProjectsKey);
+        updateRecentProjectsMenu();
+    });
+}
 
 // ============================================================
 // 编译：将整个项目 PLCopen XML 转换为 ST 中间代码，显示到控制台
@@ -2734,6 +2891,42 @@ void MainWindow::buildProject()
 // ============================================================
 void MainWindow::downloadProject()
 {
+    if (m_connState != PlcConnState::Connected) {
+        QMessageBox::information(this, "Download", "Please connect to a PLC before downloading.");
+        statusBar()->showMessage("Not connected to PLC.", 3000);
+        return;
+    }
+
+    if (m_plcUri == "SIM://SmartSim") {
+        if (!m_project) {
+            QMessageBox::warning(this, "SmartSim", "Please create or open a project first.");
+            return;
+        }
+        if (m_project->filePath.isEmpty()) {
+            QMessageBox::warning(this, "SmartSim", "Please save the project before downloading to simulation.");
+            return;
+        }
+
+        ProjectManager::syncScenesBeforeSave(m_sceneMap);
+        m_project->saveToFile(m_project->filePath);
+
+        if (!m_smartSimWindow)
+            openSmartSim();
+        if (!m_smartSimWindow)
+            return;
+
+        statusBar()->showMessage("Downloading program to SmartSim...", 3000);
+        if (m_smartSimWindow->downloadProgram()) {
+            setPlcConnState(PlcConnState::Connected);
+            setPlcRunState(PlcRunState::Stopped);
+            statusBar()->showMessage("Program downloaded to SmartSim.", 3000);
+        } else {
+            setPlcRunState(PlcRunState::Error);
+            statusBar()->showMessage("SmartSim download failed.", 5000);
+        }
+        return;
+    }
+
     DownloadDialog dlg(this);
     if (!m_lastBuildOutput.isEmpty() && QFileInfo::exists(m_lastBuildOutput)) {
         dlg.setBinaryPath(m_lastBuildOutput);
@@ -3068,6 +3261,7 @@ void MainWindow::setPlcConnState(PlcConnState state)
     }
     if (m_aRun)  m_aRun->setEnabled(connected);
     if (m_aStop) m_aStop->setEnabled(connected);
+    if (m_aTransfer) m_aTransfer->setEnabled(connected);
 
     // 未连接时重置运行状态
     if (state == PlcConnState::Disconnected)
@@ -3113,6 +3307,9 @@ void MainWindow::connectToPlc()
                 m_plcUri.isEmpty() ? "PLC" : m_plcUri),
             QMessageBox::Yes | QMessageBox::No);
         if (ret == QMessageBox::Yes) {
+            const bool disconnectingSim = (m_plcUri == "SIM://SmartSim");
+            if (disconnectingSim && m_smartSimWindow)
+                m_smartSimWindow->close();
             m_plcUri.clear();
             setPlcConnState(PlcConnState::Disconnected);
             setPlcRunState(PlcRunState::Unknown);
@@ -3124,13 +3321,34 @@ void MainWindow::connectToPlc()
     // 未连接 → 弹出连接对话框
     QDialog dlg(this);
     dlg.setWindowTitle("Connect to PLC");
-    dlg.setFixedWidth(340);
+    dlg.setFixedWidth(380);
 
     QFormLayout form(&dlg);
 
-    auto* uriEdit = new QLineEdit(
-        m_plcUri.isEmpty() ? "PYRO://localhost:61131" : m_plcUri);
+    auto* targetCombo = new QComboBox(&dlg);
+    targetCombo->addItem("SmartSim (PC Simulation)", "sim");
+    targetCombo->addItem("Custom PLC URI", "uri");
+    form.addRow("PLC:", targetCombo);
+
+    const QString defaultUri =
+        (!m_plcUri.isEmpty() && m_plcUri != "SIM://SmartSim")
+            ? m_plcUri
+            : QStringLiteral("PYRO://localhost:61131");
+    auto* uriEdit = new QLineEdit(defaultUri, &dlg);
     form.addRow("PLC URI:", uriEdit);
+
+    const int defaultIndex = (m_plcUri == "SIM://SmartSim") ? 0 : 1;
+    targetCombo->setCurrentIndex(defaultIndex);
+    uriEdit->setEnabled(defaultIndex == 1);
+    connect(targetCombo,
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
+            &dlg,
+            [targetCombo, uriEdit](int) {
+        const bool customUri = (targetCombo->currentData().toString() == "uri");
+        uriEdit->setEnabled(customUri);
+        if (customUri)
+            uriEdit->setFocus();
+    });
 
     QDialogButtonBox btns(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
                           Qt::Horizontal, &dlg);
@@ -3139,6 +3357,25 @@ void MainWindow::connectToPlc()
     connect(&btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
 
     if (dlg.exec() != QDialog::Accepted) return;
+
+    if (targetCombo->currentData().toString() == "sim") {
+        if (!m_project) {
+            QMessageBox::warning(this, "SmartSim", "Please create or open a project first.");
+            return;
+        }
+        if (m_project->filePath.isEmpty()) {
+            QMessageBox::warning(this, "SmartSim", "Please save the project before starting simulation.");
+            return;
+        }
+
+        openSmartSim();
+        m_plcUri = "SIM://SmartSim";
+        setPlcConnState(PlcConnState::Connected);
+        setPlcRunState(PlcRunState::Stopped);
+        statusBar()->showMessage("Connected to SmartSim.", 3000);
+        return;
+    }
+
     const QString uri = uriEdit->text().trimmed();
     if (uri.isEmpty()) return;
 

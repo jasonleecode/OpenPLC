@@ -3,6 +3,7 @@
 #include <QMap>
 #include <QIcon>
 #include <QMetaObject>
+#include <QStringList>
 
 #include "../core/models/ProjectModel.h"
 #include "../editor/scene/LadderScene.h"     // EditorMode 枚举
@@ -20,6 +21,7 @@ class QLabel;
 class PlcOpenViewer;
 class LadderView;
 class SmartSimWidget;
+class QMenu;
 
 // ─────────────────────────────────────────────────────────────
 // PLC 连接状态
@@ -64,6 +66,7 @@ private:
     // ---- 项目操作（委托给 ProjectManager）----
     void newProject();
     void openProject();
+    void openRecentProject(const QString& path);
     void saveProject();
     void saveProjectAs();
     void buildProject();     // 编译：生成 C 代码
@@ -102,6 +105,10 @@ private:
 
     // ---- 窗口标题 ----
     void updateWindowTitle();
+    QStringList recentProjectPaths() const;
+    void addRecentProject(const QString& path);
+    void removeRecentProject(const QString& path);
+    void updateRecentProjectsMenu();
 
     // ---- 主题 ----
     void applyTheme(const QString& qrcPath);  // 加载并应用 QSS
@@ -136,6 +143,7 @@ private:
     QTabWidget*     m_consoleTabs = nullptr;
     QPlainTextEdit* m_consoleEdit = nullptr;
     QPlainTextEdit* m_plcLogEdit = nullptr;
+    QMenu* m_recentProjectsMenu = nullptr;
     QStringList m_simDiVars;
     QStringList m_simDoVars;
     QStringList m_simAiVars;

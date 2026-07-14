@@ -70,12 +70,17 @@ void ProjectManager::openProject()
         "TiZi Project (*.tizi);;XML Files (*.xml);;All Files (*)");
     if (path.isEmpty()) return;
 
+    openProject(path);
+}
+
+bool ProjectManager::openProject(const QString& path)
+{
     auto* proj = new ProjectModel(nullptr);
     if (!proj->loadFromFile(path)) {
         QMessageBox::critical(m_parent, "Open Error",
             QString("Failed to open:\n%1").arg(path));
         delete proj;
-        return;
+        return false;
     }
 
     m_project = proj;
@@ -84,6 +89,7 @@ void ProjectManager::openProject()
         emit firstPouReady(proj->pous.first());
     emit titleUpdateNeeded();
     emit statusMessage(QString("Opened: %1").arg(path), 3000);
+    return true;
 }
 
 // ============================================================
