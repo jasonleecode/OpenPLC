@@ -28,6 +28,14 @@
 editor/tests/verify_build_pipeline.sh
 ```
 
+XCODE/WASM 构建链路验证脚本：
+
+```bash
+WASI_SDK_DIR=/path/to/wasi-sdk editor/tests/verify_xcode_pipeline.sh
+```
+
+当前仓库里的 `editor/tools/wasm/wasi-sdk` 是指向 macOS 下载目录的断链；Linux 上需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定。
+
 默认使用：
 
 ```text
@@ -186,6 +194,20 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
   - 高到低只产生 1 个 falling 脉冲扫描周期
   - 低电平保持时无重复 falling 脉冲
 
+### 14. XCODE 构建链路可验证化
+
+原风险：XCODE 只修复了 `.xcode.bin` 镜像头，但没有独立脚本验证 `StGenerator -> iec2c -> wasi-clang -> .wasm -> .xcode.bin`。
+
+当前状态：
+
+- 新增 `verify_xcode_pipeline.sh`。
+- 脚本会生成 ST、运行 `iec2c`、调用 WASI-SDK `clang` 生成 `.wasm`、生成 `.xcode.bin`，并校验：
+  - XCODE magic `0x57415300`
+  - header 中 wasm size 与实际 `.wasm` 一致
+  - 镜像 payload 与 `.wasm` 完全一致
+  - 如果 `llvm-objdump` 可用，检查 `plc_init` / `plc_run` 导出
+- Editor 查找 WASI-SDK 时支持 `WASI_SDK_DIR` 环境变量，便于 Linux 本机或 CI 指定工具链路径。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -200,13 +222,13 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 
 当前边沿逻辑已经通过本机 C driver 的扫描周期回归，但还需要在真实 Runtime 任务调度和 IO 刷新路径中确认与预期 PLC 行为一致。
 
-### 3. XCODE 未做完整运行验证
+### 3. XCODE/WAMR 真实运行验证
 
-已修复下载镜像格式，但还没有验证：
+已有 XCODE 构建和镜像格式验证脚本，但当前机器缺少可用 Linux WASI-SDK，仓库内 `wamrc` 也是 macOS arm64 可执行文件。仍需要在安装工具链后验证：
 
-- WASI-SDK 实际编译
+- `verify_xcode_pipeline.sh` 的真实 wasm 编译路径
 - `.xcode.bin` 下载到 Runtime B 区
-- WAMR 加载镜像
+- WAMR/iwasm 加载镜像
 - `plc_init()` / `plc_run(ms)` 实际调用
 
 ### 4. Linux matiec 二进制直接入库

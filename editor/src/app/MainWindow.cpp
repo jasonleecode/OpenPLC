@@ -1849,6 +1849,7 @@ void MainWindow::buildProject()
     // 查找 WASI-SDK 目录（XCODE 模式使用）
     auto findWasiSdkDir = []() -> QString {
         QStringList candidates = {
+            qEnvironmentVariable("WASI_SDK_DIR"),
             QCoreApplication::applicationDirPath() + "/tools/wasm/wasi-sdk",
             QString(WASI_SDK_DIR),
         };
