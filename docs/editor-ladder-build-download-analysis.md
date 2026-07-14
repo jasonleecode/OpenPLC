@@ -306,11 +306,25 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 新增 `verify_toolchain_manifest.sh`，校验 manifest schema、唯一 ID、必需字段和路径存在性；对 macOS symlink 使用 `lexists`，保留跨平台目录。
 - CI 已接入 manifest 校验。
 
+### 22. PLCopen SFC action/transition 图形体
+
+原风险：PLCopen POU 级 `actions` 中的 LD/FBD body 没有生成到 ST；SFC `actionBlock` 中的 `<reference name="...">` 也会被忽略。`traffic.tizi` 中 `BLINK_ORANGE_LIGHT` 的 LD 定时闪烁逻辑因此丢失。
+
+同时，命名 transition（例如 `STOP`）的 FBD body 没有展开，SFC `<condition><reference name="STOP"/>` 会退化为默认 `TRUE`，改变状态机行为。
+
+当前状态：
+
+- `StGenerator` 会生成 POU 级 `ACTION`，支持 action body 中的 ST/IL/LD/FBD/SFC。
+- SFC `actionBlock` 会保留 reference action 调用和 `S/R/D/P/N` qualifier，包括 duration 参数。
+- 命名 transition 的 ST/FBD/LD body 会展开为 SFC transition 条件表达式。
+- `NOT` FBD block 会生成标准 `NOT (<expr>)` 表达式，避免在 transition 条件里生成 matiec 不接受的 `NOT(IN := ...)`。
+- `verify_build_pipeline.sh` 已用 `traffic.tizi` 覆盖 `BLINK_ORANGE_LIGHT`、TON/R_TRIG 调用、duration action 和 `STOP` transition 展开。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
 
-当前 `StGenerator` 已覆盖基础路径，但仍不是完整 PLCopen 图形语言编译器。需要继续测试：
+当前 `StGenerator` 已覆盖基础路径，并已补充 PLCopen action/transition 图形体回归，但仍不是完整 PLCopen 图形语言编译器。需要继续测试：
 
 - block 多输出端口在大型 PLCopen 样例中的完整回归
 - block 多输出端口已有最小 CTU fixture 覆盖；仍需在大型 PLCopen 样例中完整回归

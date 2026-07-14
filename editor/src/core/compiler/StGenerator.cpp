@@ -505,7 +505,15 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
                 QString port = el.outputPorts.isEmpty() ? "OUT" : el.outputPorts.first();
                 int uses = useCount.value({el.localId, {}}, 0)
                          + useCount.value({el.localId, port}, 0);
-                QString callExpr = QString("%1(%2)").arg(el.typeName, args.join(", "));
+                QString callExpr;
+                if (el.typeName == "NOT"
+                    && namedInputs.contains("IN")
+                    && namedInputs.size() == 1
+                    && positionalArgs.isEmpty()) {
+                    callExpr = QString("NOT (%1)").arg(mergeSignals(namedInputs.value("IN"), "FALSE"));
+                } else {
+                    callExpr = QString("%1(%2)").arg(el.typeName, args.join(", "));
+                }
                 if (uses > 1) {
                     // 多次引用：需要临时变量
                     // Without type information for arbitrary function outputs,
@@ -544,7 +552,8 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
 // ───────────────────────────────────────────────────────────────────────────
 // SFC → matiec 原生 SFC 文本
 // ───────────────────────────────────────────────────────────────────────────
-static QStringList sfcToText(const QDomElement& sfcEl)
+static QStringList sfcToText(const QDomElement& sfcEl,
+                             const QMap<QString, QString>& namedTransitions = QMap<QString, QString>())
 {
     QStringList out;
 
@@ -554,7 +563,17 @@ static QStringList sfcToText(const QDomElement& sfcEl)
     };
     QMap<int, StepInfo>      steps;
     QMap<int, QString>       transCond;  // localId → ST 条件
-    QMap<int, QList<QString>> stepActs;  // stepLocalId → 内联 ST 列表
+    QMap<int, QList<QString>> stepActCalls; // stepLocalId → action calls
+    QList<QPair<QString, QStringList>> inlineActionDefs;
+
+    auto actionCall = [](const QString& name,
+                         const QString& qualifier,
+                         const QString& duration) -> QString {
+        const QString q = qualifier.trimmed().isEmpty() ? "N" : qualifier.trimmed();
+        if (!duration.trimmed().isEmpty())
+            return QString("%1(%2, %3);").arg(name, q, duration.trimmed());
+        return QString("%1(%2);").arg(name, q);
+    };
 
     // 解析所有节点
     for (QDomElement e = sfcEl.firstChildElement();
@@ -571,7 +590,14 @@ static QStringList sfcToText(const QDomElement& sfcEl)
             QDomElement cond = fc(e, "condition");
             QDomElement inl  = fc(cond, "inline");
             QDomElement stEl = fc(inl, "ST");
-            transCond[id] = cdata(stEl).trimmed();
+            QString conditionText = cdata(stEl).trimmed();
+            if (conditionText.isEmpty()) {
+                QDomElement ref = fc(cond, "reference");
+                const QString refName = ref.attribute("name").trimmed();
+                if (!refName.isEmpty())
+                    conditionText = namedTransitions.value(refName, refName);
+            }
+            transCond[id] = conditionText;
         }
         else if (tag == "actionBlock") {
             QDomElement cpi = fc(e, "connectionPointIn");
@@ -579,12 +605,25 @@ static QStringList sfcToText(const QDomElement& sfcEl)
             int stepId = con.isNull() ? -1 : con.attribute("refLocalId").toInt();
             QList<QString> acts;
             for (const QDomElement& act : ch(e, "action")) {
+                const QString qualifier = act.attribute("qualifier", "N");
+                const QString duration = act.attribute("duration");
                 QDomElement inl  = fc(act, "inline");
                 QDomElement stEl = fc(inl, "ST");
                 QString code = cdata(stEl).trimmed();
-                if (!code.isEmpty()) acts << code;
+                if (!code.isEmpty()) {
+                    const QString stepName = steps.value(stepId).name;
+                    const QString actionName = QString("%1_act%2").arg(stepName).arg(acts.size());
+                    acts << actionCall(actionName, qualifier, duration);
+                    inlineActionDefs << qMakePair(actionName, code.split('\n'));
+                    continue;
+                }
+
+                QDomElement ref = fc(act, "reference");
+                const QString refName = ref.attribute("name").trimmed();
+                if (!refName.isEmpty())
+                    acts << actionCall(refName, qualifier, duration);
             }
-            if (stepId >= 0) stepActs[stepId] = acts;
+            if (stepId >= 0) stepActCalls[stepId] = acts;
         }
     }
 
@@ -615,9 +654,9 @@ static QStringList sfcToText(const QDomElement& sfcEl)
             out << QString("STEP %1:").arg(s.name);
 
         // 内联动作引用（生成唯一名称）
-        auto acts = stepActs.value(id);
-        for (int i = 0; i < acts.size(); ++i)
-            out << QString("  %1_act%2(N);").arg(s.name).arg(i);
+        auto acts = stepActCalls.value(id);
+        for (const QString& act : acts)
+            out << "  " + act;
 
         out << "END_STEP";
         out << "";
@@ -690,18 +729,124 @@ static QStringList sfcToText(const QDomElement& sfcEl)
     }
 
     // ── 生成内联动作定义 ──────────────────────────────────────
-    for (const auto& [id, s] : steps.asKeyValueRange()) {
-        auto acts = stepActs.value(id);
-        for (int i = 0; i < acts.size(); ++i) {
-            out << QString("ACTION %1_act%2:").arg(s.name).arg(i);
-            for (const QString& line : acts[i].split('\n'))
-                out << "  " + line;
-            out << "END_ACTION";
-            out << "";
-        }
+    for (const auto& actionDef : inlineActionDefs) {
+        out << QString("ACTION %1:").arg(actionDef.first);
+        for (const QString& line : actionDef.second)
+            out << "  " + line;
+        out << "END_ACTION";
+        out << "";
     }
 
     return out;
+}
+
+struct ActionStResult {
+    QStringList lines;
+    QStringList boolTemps;
+    QStringList edgeTemps;
+};
+
+static ActionStResult convertPouActions(const QDomElement& pouEl)
+{
+    ActionStResult result;
+    QDomElement actionsEl = fc(pouEl, "actions");
+    if (actionsEl.isNull()) return result;
+
+    for (const QDomElement& actionEl : ch(actionsEl, "action")) {
+        const QString actionName = actionEl.attribute("name").trimmed();
+        if (actionName.isEmpty()) continue;
+
+        QDomElement body = fc(actionEl, "body");
+        if (body.isNull()) continue;
+
+        result.lines << QString("  ACTION %1:").arg(actionName);
+
+        QDomElement fbdEl = fc(body, "FBD");
+        if (fbdEl.isNull()) fbdEl = fc(body, "LD");
+        if (!fbdEl.isNull()) {
+            auto elems = parseFbd(fbdEl);
+            FbdStResult fbdResult = fbdToSt(elems);
+            result.boolTemps << fbdResult.boolTemps;
+            result.edgeTemps << fbdResult.edgeTemps;
+            for (const QString& ln : fbdResult.lines)
+                result.lines << "  " + ln;
+        } else {
+            QDomElement stEl = fc(body, "ST");
+            QDomElement ilEl = fc(body, "IL");
+            QDomElement sfcEl = fc(body, "SFC");
+            if (!stEl.isNull()) {
+                for (const QString& ln : cdata(stEl).split('\n'))
+                    result.lines << "    " + ln;
+            } else if (!ilEl.isNull()) {
+                for (const QString& ln : cdata(ilEl).split('\n'))
+                    result.lines << "    " + ln;
+            } else if (!sfcEl.isNull()) {
+                for (const QString& ln : sfcToText(sfcEl))
+                    result.lines << "  " + ln;
+            }
+        }
+
+        result.lines << "  END_ACTION";
+        result.lines << "";
+    }
+
+    return result;
+}
+
+static QString firstAssignmentExpression(const QStringList& lines, const QString& preferredTarget)
+{
+    QString fallback;
+    for (QString line : lines) {
+        line = line.trimmed();
+        if (!line.endsWith(';')) continue;
+        line.chop(1);
+        const int assignPos = line.indexOf(":=");
+        if (assignPos < 0) continue;
+
+        const QString target = line.left(assignPos).trimmed();
+        const QString expr = line.mid(assignPos + 2).trimmed();
+        if (expr.isEmpty()) continue;
+        if (!preferredTarget.isEmpty() && target == preferredTarget)
+            return expr;
+        if (fallback.isEmpty())
+            fallback = expr;
+    }
+    return fallback;
+}
+
+static QMap<QString, QString> namedTransitionExpressions(const QDomElement& pouEl)
+{
+    QMap<QString, QString> result;
+    QDomElement transitionsEl = fc(pouEl, "transitions");
+    if (transitionsEl.isNull()) return result;
+
+    for (const QDomElement& transitionEl : ch(transitionsEl, "transition")) {
+        const QString name = transitionEl.attribute("name").trimmed();
+        if (name.isEmpty()) continue;
+
+        QDomElement body = fc(transitionEl, "body");
+        if (body.isNull()) continue;
+
+        QDomElement stEl = fc(body, "ST");
+        if (!stEl.isNull()) {
+            const QString expr = cdata(stEl).trimmed();
+            if (!expr.isEmpty())
+                result[name] = expr;
+            continue;
+        }
+
+        QDomElement fbdEl = fc(body, "FBD");
+        if (fbdEl.isNull()) fbdEl = fc(body, "LD");
+        if (!fbdEl.isNull()) {
+            auto elems = parseFbd(fbdEl);
+            FbdStResult fbdResult = fbdToSt(elems);
+            const QString expr = firstAssignmentExpression(fbdResult.lines, name);
+            if (!expr.isEmpty())
+                result[name] = expr;
+        }
+    }
+
+    return result;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -724,6 +869,8 @@ static QStringList convertPou(const QDomElement& pouEl)
         auto elems = parseFbd(fbdEl);
         fbdResult = fbdToSt(elems);
     }
+    ActionStResult actionResult = convertPouActions(pouEl);
+    QMap<QString, QString> transitionExprs = namedTransitionExpressions(pouEl);
 
     // ── 头部关键字 ────────────────────────────────────────
     QString keyword, endKeyword;
@@ -752,7 +899,13 @@ static QStringList convertPou(const QDomElement& pouEl)
     emitVarBlock(fc(iface, "localVars"),
                  "VAR", false, out);
     QStringList tempNames = fbdResult.boolTemps;
+    for (const QString& tempName : actionResult.boolTemps)
+        if (!tempNames.contains(tempName))
+            tempNames << tempName;
     for (const QString& edgeName : fbdResult.edgeTemps)
+        if (!tempNames.contains(edgeName))
+            tempNames << edgeName;
+    for (const QString& edgeName : actionResult.edgeTemps)
         if (!tempNames.contains(edgeName))
             tempNames << edgeName;
     emitBoolTemps(tempNames, out);
@@ -769,6 +922,8 @@ static QStringList convertPou(const QDomElement& pouEl)
         QString code = cdata(stEl);
         for (const QString& ln : code.split('\n'))
             out << "  " + ln;
+        for (const QString& ln : actionResult.lines)
+            out << ln;
         out << endKeyword;
         out << "";
         return out;
@@ -780,6 +935,8 @@ static QStringList convertPou(const QDomElement& pouEl)
         QString code = cdata(ilEl);
         for (const QString& ln : code.split('\n'))
             out << "  " + ln;
+        for (const QString& ln : actionResult.lines)
+            out << ln;
         out << endKeyword;
         out << "";
         return out;
@@ -788,8 +945,10 @@ static QStringList convertPou(const QDomElement& pouEl)
     // SFC
     QDomElement sfcEl = fc(body, "SFC");
     if (!sfcEl.isNull()) {
-        for (const QString& ln : sfcToText(sfcEl))
+        for (const QString& ln : sfcToText(sfcEl, transitionExprs))
             out << "  " + ln;
+        for (const QString& ln : actionResult.lines)
+            out << ln;
         out << endKeyword;
         out << "";
         return out;
@@ -799,12 +958,16 @@ static QStringList convertPou(const QDomElement& pouEl)
     if (hasFbdBody) {
         for (const QString& ln : fbdResult.lines)
             out << ln;
+        for (const QString& ln : actionResult.lines)
+            out << ln;
         out << endKeyword;
         out << "";
         return out;
     }
 
     out << "  (* Unsupported body language *)";
+    for (const QString& ln : actionResult.lines)
+        out << ln;
     out << endKeyword;
     out << "";
     return out;
