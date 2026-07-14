@@ -215,6 +215,17 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
   - 如果 `llvm-objdump` 可用，检查 `plc_init` / `plc_run` 导出
 - Editor 查找 WASI-SDK 时支持 `WASI_SDK_DIR` 环境变量，便于 Linux 本机或 CI 指定工具链路径。
 
+### 15. Editor 占位入口清理
+
+原问题：Editor 菜单和下载窗口中仍有多个用户可见的 “not implemented / coming soon” 占位入口。
+
+当前状态：
+
+- PLC Browser 菜单会打开只读变量浏览器，按 POU 汇总变量名、类型、作用域和初始值。
+- License Editor 菜单改为 License Information，可查看项目元信息和仓库 LICENSE 内容。
+- Ethernet 下载标签页文案已改为实际 TCP 传输说明；`TcpTransport` 已通过 `QTcpSocket` 接入下载协议。
+- 未知 POU 语言的兜底文案改为明确的 unsupported language；LD/FBD/SFC 仍走统一图形编辑器。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -246,16 +257,9 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 增加构建脚本，从 matiec 源码构建本机工具。
 - 在 CI 中验证工具可执行。
 
-### 5. 非 LD 图形编辑器仍有占位
+### 5. Ethernet Runtime server side
 
-Editor 中仍有部分功能是占位或未实现：
-
-- Variable Browser
-- License Editor
-- Ethernet Runtime server side
-- 部分非 LD 图形编辑 “coming soon”
-
-这些不阻断当前 LD 编译下载链路，但影响产品完整性。
+Editor 端 TCP transport 已可用，但还需要在 Runtime 侧实现或确认 TCP server，把现有串口下载协议透明承载到 Ethernet。
 
 ## 未提交的样例文件
 

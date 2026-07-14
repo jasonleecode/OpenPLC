@@ -26,6 +26,7 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QHeaderView>
+#include <QAbstractItemView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QComboBox>
@@ -257,8 +258,55 @@ void MainWindow::setupMenuBar()
     auto* aBrowser = plcMenu->addAction(
         QIcon(":/images/IO_VARIABLE.png"), "Browser");
     connect(aBrowser, &QAction::triggered, this, [this]{
-        QMessageBox::information(this, "Variable Browser",
-            "Variable browser is not yet implemented.");
+        QDialog dlg(this);
+        dlg.setWindowTitle("Variable Browser");
+        dlg.resize(760, 420);
+
+        auto* layout = new QVBoxLayout(&dlg);
+        auto* table = new QTableWidget(&dlg);
+        table->setColumnCount(7);
+        table->setHorizontalHeaderLabels({
+            "POU", "POU Type", "Language", "Class", "Name", "Type", "Initial Value"
+        });
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->setAlternatingRowColors(true);
+
+        int row = 0;
+        if (m_project) {
+            for (const PouModel* pou : m_project->pous)
+                row += pou->variables.size();
+        }
+        table->setRowCount(row);
+
+        row = 0;
+        if (m_project) {
+            for (const PouModel* pou : m_project->pous) {
+                for (const VariableDecl& v : pou->variables) {
+                    const QStringList values = {
+                        pou->name,
+                        PouModel::typeToString(pou->pouType),
+                        PouModel::langToString(pou->language),
+                        v.varClass,
+                        v.name,
+                        v.type,
+                        v.initValue
+                    };
+                    for (int col = 0; col < values.size(); ++col)
+                        table->setItem(row, col, new QTableWidgetItem(values[col]));
+                    ++row;
+                }
+            }
+        }
+
+        table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+        table->horizontalHeader()->setStretchLastSection(true);
+        layout->addWidget(table);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+        connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        layout->addWidget(buttons);
+        dlg.exec();
     });
 
     plcMenu->addSeparator();
@@ -293,8 +341,50 @@ void MainWindow::setupMenuBar()
 
     auto* aLicenseEditor = extrasMenu->addAction("License Editor");
     connect(aLicenseEditor, &QAction::triggered, this, [this]{
-        QMessageBox::information(this, "License Editor",
-            "License editor is not yet implemented.");
+        QDialog dlg(this);
+        dlg.setWindowTitle("License Information");
+        dlg.resize(640, 420);
+
+        auto* layout = new QVBoxLayout(&dlg);
+        auto* text = new QPlainTextEdit(&dlg);
+        text->setReadOnly(true);
+
+        QString info;
+        const QString licensePath = QDir::cleanPath(QCoreApplication::applicationDirPath()
+                                                    + "/../LICENSE");
+        const QString sourceLicensePath = QDir::cleanPath(QDir::currentPath() + "/LICENSE");
+        QString resolvedLicensePath;
+        if (QFileInfo::exists(licensePath))
+            resolvedLicensePath = licensePath;
+        else if (QFileInfo::exists(sourceLicensePath))
+            resolvedLicensePath = sourceLicensePath;
+
+        info += "Project: TiZi / OpenPLC Editor\n";
+        if (m_project) {
+            info += "PLC Project: " + m_project->projectName + "\n";
+            info += "Author: " + m_project->author + "\n";
+            info += "Company: " + m_project->companyName + "\n";
+            info += "Product Version: " + m_project->productVersion + "\n";
+        }
+        info += "\n";
+        if (resolvedLicensePath.isEmpty()) {
+            info += "Repository license file was not found next to the application or in the current working directory.\n";
+        } else {
+            info += "License File: " + resolvedLicensePath + "\n\n";
+            QFile f(resolvedLicensePath);
+            if (f.open(QFile::ReadOnly | QFile::Text))
+                info += QString::fromUtf8(f.readAll());
+            else
+                info += "Unable to read license file.\n";
+        }
+
+        text->setPlainText(info);
+        layout->addWidget(text);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+        connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        layout->addWidget(buttons);
+        dlg.exec();
     });
 
     extrasMenu->addSeparator();
@@ -1486,12 +1576,12 @@ QWidget* MainWindow::createPouEditorWidget(PouModel* pou)
         editorArea = editor;
 
     } else {
-        // ── 其他占位 ──────────────────────────────────────────────
-        auto* placeholder = new QLabel(
-            QString("[ %1 editor — coming soon ]")
+        // ── 未知语言兜底 ──────────────────────────────────────────
+        auto* fallback = new QLabel(
+            QString("[ Unsupported POU language: %1 ]")
                 .arg(PouModel::langToString(pou->language)));
-        placeholder->setAlignment(Qt::AlignCenter);
-        editorArea = placeholder;
+        fallback->setAlignment(Qt::AlignCenter);
+        editorArea = fallback;
     }
 
     QSplitter* splitter = new QSplitter(Qt::Vertical);

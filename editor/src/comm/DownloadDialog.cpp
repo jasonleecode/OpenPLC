@@ -70,7 +70,7 @@ void DownloadDialog::setupUi()
 
     m_transportTabs->addTab(serialWidget, "Serial");
 
-    // ---- Ethernet 标签页（占位，coming soon）----
+    // ---- Ethernet 标签页 ----
     auto* tcpWidget = new QWidget;
     auto* tcpLayout = new QVBoxLayout(tcpWidget);
     auto* tcpForm   = new QFormLayout;
@@ -84,8 +84,8 @@ void DownloadDialog::setupUi()
     m_tcpPortSpin->setValue(6699);
     tcpForm->addRow("Port:", m_tcpPortSpin);
 
-    auto* tcpNote = new QLabel("<i>Ethernet transport is ready for integration.<br>"
-                               "Requires a TCP server on the PLC runtime side.</i>");
+    auto* tcpNote = new QLabel("<i>Uses the same TiZi download protocol over TCP.<br>"
+                               "The PLC runtime must expose the matching TCP service.</i>");
     tcpNote->setWordWrap(true);
     tcpNote->setStyleSheet("color: gray;");
 
