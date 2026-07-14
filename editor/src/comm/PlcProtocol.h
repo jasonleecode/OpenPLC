@@ -25,7 +25,10 @@ class PlcProtocol : public QObject {
 public:
     // 与 runtime/shared_interface.h 保持一致
     static constexpr uint32_t USER_FLASH_BASE = 0x00004000u;
+    static constexpr uint32_t USER_FLASH_SIZE = 16u * 1024u;
     static constexpr uint32_t FLASH_PAGE_SIZE = 256u;
+    static constexpr uint32_t USER_LOGIC_MAGIC = 0xDEADBEEFu;
+    static constexpr uint32_t XCODE_WASM_MAGIC = 0x57415300u;
 
     // 命令码
     static constexpr uint8_t CMD_PING        = 0x01;

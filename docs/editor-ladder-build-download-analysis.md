@@ -78,6 +78,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - NCC post-build 后保存最终 `.bin` 或可执行产物路径。
 - XCODE build 后保存 `.xcode.bin` 路径。
 - `downloadProject()` 会预填最近一次构建产物。
+- 下载前会校验文件格式、magic 和 B 区大小。
 
 ### 5. XCODE 下载镜像头
 
@@ -108,6 +109,17 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - NCC post-build 后会检查 `max_size_bytes`。
 - 超限会 Build 失败，不再继续暴露为可下载产物。
 - XCODE 镜像会按 driver `memory_map.user_flash_size_kb` 检查大小。
+- `DownloadDialog` 下载前也会检查文件不超过 Runtime B 区 16KB。
+
+### 8. 下载文件防误选
+
+原问题：Build 后会预填正确产物，但用户仍可 Browse 任意文件。
+
+当前状态：
+
+- 只接受 NCC `.bin` 镜像或 XCODE `.xcode.bin` 镜像。
+- NCC 镜像要求 offset 0 为 `USER_LOGIC_MAGIC = 0xDEADBEEF`。
+- XCODE 镜像要求 offset 0 为 `XCODE_WASM_MAGIC = 0x57415300`，并校验 header 中的 wasm size 与文件长度一致。
 
 ## 剩余风险
 
@@ -135,15 +147,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - WAMR 加载镜像
 - `plc_init()` / `plc_run(ms)` 实际调用
 
-### 4. DownloadDialog 仍允许手动选错文件
-
-Build 后会预填正确产物，但用户仍可 Browse 任意文件。建议后续下载前做模式相关校验：
-
-- NCC: 检查 `USER_LOGIC_MAGIC`
-- XCODE: 检查 `XCODE_WASM_MAGIC`
-- 检查文件大小不超过 B 区
-
-### 5. Linux matiec 二进制直接入库
+### 4. Linux matiec 二进制直接入库
 
 当前方案能工作，但二进制入库会带来仓库体积和平台兼容风险。可选后续方案：
 
@@ -151,7 +155,7 @@ Build 后会预填正确产物，但用户仍可 Browse 任意文件。建议后
 - 增加构建脚本，从 matiec 源码构建本机工具。
 - 在 CI 中验证工具可执行。
 
-### 6. 非 LD 图形编辑器仍有占位
+### 5. 非 LD 图形编辑器仍有占位
 
 Editor 中仍有部分功能是占位或未实现：
 

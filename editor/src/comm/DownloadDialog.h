@@ -38,6 +38,12 @@ public:
     void setBinaryPath(const QString& path);
 
 private:
+    enum class BinaryKind {
+        Unknown,
+        NccImage,
+        XcodeImage,
+    };
+
     void setupUi();
 
     // 槽
@@ -48,6 +54,9 @@ private:
     void onTransportTabChanged(int index);
 
     // 帮助方法
+    static quint32 readLe32(const QByteArray& data, int offset);
+    BinaryKind inferBinaryKind(const QString& path, const QByteArray& data) const;
+    bool validateBinary(const QString& path, const QByteArray& data);
     void setUiBusy(bool busy);
     void appendLog(const QString& msg);
     void onProgress(int page, int total);

@@ -21,6 +21,7 @@
 #include <QMessageBox>
 #include <QDateTime>
 #include <QFont>
+#include <QFileInfo>
 
 DownloadDialog::DownloadDialog(QWidget* parent)
     : QDialog(parent)
@@ -165,7 +166,7 @@ void DownloadDialog::onBrowse()
 {
     QString path = QFileDialog::getOpenFileName(
         this, "Select Binary File", QString(),
-        "Binary Files (*.bin);;All Files (*)");
+        "PLC Download Images (*.bin *.xcode.bin);;All Files (*)");
     if (!path.isEmpty())
         m_binPathEdit->setText(path);
 }
@@ -205,6 +206,8 @@ void DownloadDialog::onDownload()
         QMessageBox::warning(this, "Download", "Binary file is empty.");
         return;
     }
+    if (!validateBinary(binPath, binData))
+        return;
 
     // 创建传输层
     delete m_protocol;  m_protocol  = nullptr;
@@ -278,6 +281,88 @@ void DownloadDialog::onAbort()
 // ─────────────────────────────────────────────────────────────────────────────
 // 辅助
 // ─────────────────────────────────────────────────────────────────────────────
+quint32 DownloadDialog::readLe32(const QByteArray& data, int offset)
+{
+    if (offset < 0 || data.size() < offset + 4)
+        return 0;
+    return static_cast<quint32>(static_cast<unsigned char>(data[offset]))
+         | (static_cast<quint32>(static_cast<unsigned char>(data[offset + 1])) << 8)
+         | (static_cast<quint32>(static_cast<unsigned char>(data[offset + 2])) << 16)
+         | (static_cast<quint32>(static_cast<unsigned char>(data[offset + 3])) << 24);
+}
+
+DownloadDialog::BinaryKind
+DownloadDialog::inferBinaryKind(const QString& path, const QByteArray& data) const
+{
+    const QString suffix = QFileInfo(path).fileName().toLower();
+    const quint32 magic = readLe32(data, 0);
+
+    if (suffix.endsWith(".xcode.bin") || magic == PlcProtocol::XCODE_WASM_MAGIC)
+        return BinaryKind::XcodeImage;
+    if (suffix.endsWith(".bin") || magic == PlcProtocol::USER_LOGIC_MAGIC)
+        return BinaryKind::NccImage;
+    return BinaryKind::Unknown;
+}
+
+bool DownloadDialog::validateBinary(const QString& path, const QByteArray& data)
+{
+    const BinaryKind kind = inferBinaryKind(path, data);
+    if (kind == BinaryKind::Unknown) {
+        QMessageBox::critical(this, "Download",
+            "Unsupported download file. Select a .bin NCC image or a .xcode.bin XCODE image.");
+        return false;
+    }
+
+    if (data.size() > static_cast<int>(PlcProtocol::USER_FLASH_SIZE)) {
+        QMessageBox::critical(this, "Download",
+            QString("Binary is too large for UserLogic B partition.\n\n"
+                    "File: %1 bytes\nLimit: %2 bytes")
+                .arg(data.size())
+                .arg(PlcProtocol::USER_FLASH_SIZE));
+        return false;
+    }
+
+    if (kind == BinaryKind::NccImage) {
+        const quint32 magic = readLe32(data, 0);
+        if (magic != PlcProtocol::USER_LOGIC_MAGIC) {
+            QMessageBox::critical(this, "Download",
+                QString("Invalid NCC image.\n\n"
+                        "Expected UserLogic magic 0x%1 at offset 0.\n"
+                        "Actual: 0x%2")
+                    .arg(PlcProtocol::USER_LOGIC_MAGIC, 8, 16, QChar('0'))
+                    .arg(magic, 8, 16, QChar('0')));
+            return false;
+        }
+        return true;
+    }
+
+    if (kind == BinaryKind::XcodeImage) {
+        const quint32 magic = readLe32(data, 0);
+        const quint32 wasmSize = readLe32(data, 4);
+        if (magic != PlcProtocol::XCODE_WASM_MAGIC) {
+            QMessageBox::critical(this, "Download",
+                QString("Invalid XCODE image.\n\n"
+                        "Expected XCODE magic 0x%1 at offset 0.\n"
+                        "Actual: 0x%2")
+                    .arg(PlcProtocol::XCODE_WASM_MAGIC, 8, 16, QChar('0'))
+                    .arg(magic, 8, 16, QChar('0')));
+            return false;
+        }
+        if (wasmSize == 0 || data.size() != static_cast<int>(wasmSize + 8u)) {
+            QMessageBox::critical(this, "Download",
+                QString("Invalid XCODE image size.\n\n"
+                        "Header wasm size: %1 bytes\n"
+                        "File size: %2 bytes")
+                    .arg(wasmSize)
+                    .arg(data.size()));
+            return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
 void DownloadDialog::setUiBusy(bool busy)
 {
     m_transportTabs->setEnabled(!busy);
