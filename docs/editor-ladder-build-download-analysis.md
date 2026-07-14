@@ -340,6 +340,17 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 测试覆盖 FBD/LD counter 连续扫描递增：`1 -> 2`。
 - 测试覆盖 reset 扫描回到 `ResetCounterValue=17`，随后继续递增到 `18`。
 
+### 25. SFC transition 有状态图形条件
+
+原风险：SFC transition condition 中如果连接 TON/SR 等有状态功能块，不能只在 transition 条件里引用 `.Q`，还必须在源 step 激活期间调用这些功能块。
+
+当前状态：
+
+- `StGenerator` 会为这类 transition condition 生成 `TIZI_SFC_TRANS* : BOOL` 临时变量。
+- 生成自动 `ACTION TIZI_TRANS*_COND`，在其中按依赖调用有状态功能块并写入临时条件变量。
+- 自动 action 会挂到 transition 的来源 step 上，例如 `traffic.tizi` 的 `GREEN` step 会调用 `TIZI_TRANS37_COND(N)`。
+- `verify_build_pipeline.sh` 已断言 `SR0`、`TON3`、`TIZI_SFC_TRANS37` 的生成形态。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -350,7 +361,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - block 多输出端口已有最小 CTU fixture 覆盖；仍需在大型 PLCopen 样例中完整回归
 - 反馈回路已有 `CounterFBD` / `CounterLD` 最小运行回归；仍需更复杂环路样例
 - 图元多 `connectionPointOut` 与端口选择
-- SFC transition condition 中带 TON/SR 等有状态功能块的图形条件调用顺序
+- SFC transition condition 中带 TON/SR 等有状态功能块的图形条件已有 `traffic.tizi` 回归；仍需更复杂多 transition 共享图形样例
 
 ### 2. 边沿触点真实硬件行为需要确认
 

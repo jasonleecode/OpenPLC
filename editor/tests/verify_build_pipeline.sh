@@ -239,6 +239,12 @@ awk '
     in_transition && /END_TRANSITION/ { exit ok ? 0 : 1 }
     END { exit ok ? 0 : 1 }
 ' "$WORK_DIR/plcopen_traffic.st"
+grep -q "TIZI_SFC_TRANS37 : BOOL;" "$WORK_DIR/plcopen_traffic.st"
+grep -q "TIZI_TRANS37_COND(N);" "$WORK_DIR/plcopen_traffic.st"
+grep -q "ACTION TIZI_TRANS37_COND:" "$WORK_DIR/plcopen_traffic.st"
+grep -q "SR0(R := TON3.Q, S1 := PEDESTRIAN_BUTTON);" "$WORK_DIR/plcopen_traffic.st"
+grep -q "TON3(IN := SR0.Q1, PT := T#2s);" "$WORK_DIR/plcopen_traffic.st"
+grep -q "TIZI_SFC_TRANS37 := (TON3.Q) OR (WARN_CARS);" "$WORK_DIR/plcopen_traffic.st"
 
 compile_linux_driver "plcopen_traffic"
 compile_linux_driver "plcopen_first_steps_linux"

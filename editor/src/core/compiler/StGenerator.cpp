@@ -554,7 +554,8 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
 // SFC → matiec 原生 SFC 文本
 // ───────────────────────────────────────────────────────────────────────────
 static QStringList sfcToText(const QDomElement& sfcEl,
-                             const QMap<QString, QString>& namedTransitions = QMap<QString, QString>())
+                             const QMap<QString, QString>& namedTransitions = QMap<QString, QString>(),
+                             QStringList *boolTemps = nullptr)
 {
     QStringList out;
     QMap<int, Elem> conditionElems = parseFbd(sfcEl);
@@ -567,6 +568,7 @@ static QStringList sfcToText(const QDomElement& sfcEl,
     QMap<int, QString>       transCond;  // localId → ST 条件
     QMap<int, QList<QString>> stepActCalls; // stepLocalId → action calls
     QList<QPair<QString, QStringList>> inlineActionDefs;
+    QMap<int, QString> generatedConditionActions;
 
     auto actionCall = [](const QString& name,
                          const QString& qualifier,
@@ -683,6 +685,134 @@ static QStringList sfcToText(const QDomElement& sfcEl,
         return signal;
     };
 
+    std::function<QString(int, const QString&, QStringList&, QSet<int>&, QSet<int>&)> statefulSignal;
+    auto statefulInputSignal = [&](const Elem& el,
+                                   const QString& defaultValue,
+                                   QStringList& lines,
+                                   QSet<int>& visiting,
+                                   QSet<int>& called) -> QString {
+        QStringList parts;
+        for (const Conn& c : el.inputs) {
+            QString s = statefulSignal(c.refId, c.refPort, lines, visiting, called);
+            if (s.isEmpty()) return QString();
+            parts << s;
+        }
+        if (parts.isEmpty()) return defaultValue;
+        if (parts.size() == 1) return parts.first();
+
+        for (QString& part : parts)
+            part = QString("(%1)").arg(part);
+        return parts.join(" OR ");
+    };
+
+    statefulSignal = [&](int refId,
+                         const QString& refPort,
+                         QStringList& lines,
+                         QSet<int>& visiting,
+                         QSet<int>& called) -> QString {
+        if (refId < 0 || !conditionElems.contains(refId))
+            return QString();
+
+        const Elem& src = conditionElems[refId];
+        if (visiting.contains(refId)) {
+            if (src.kind == Elem::Block && !src.instanceName.isEmpty()) {
+                QString p = refPort.isEmpty()
+                    ? (src.outputPorts.isEmpty() ? "OUT" : src.outputPorts.first())
+                    : refPort;
+                return src.instanceName + "." + p;
+            }
+            return QString();
+        }
+
+        visiting.insert(refId);
+        QString signal;
+        switch (src.kind) {
+        case Elem::InVar:
+            signal = src.negated ? QString("NOT (%1)").arg(src.expression) : src.expression;
+            break;
+        case Elem::PowerRail:
+            signal = "TRUE";
+            break;
+        case Elem::Contact: {
+            QString in = statefulInputSignal(src, "TRUE", lines, visiting, called);
+            if (!in.isEmpty()) {
+                QString varExpr = src.negated
+                    ? QString("NOT %1").arg(src.expression)
+                    : src.expression;
+                signal = (in == "TRUE")
+                    ? varExpr
+                    : QString("(%1) AND %2").arg(in, varExpr);
+            }
+            break;
+        }
+        case Elem::Block: {
+            QMap<QString, QStringList> namedInputs;
+            QStringList positionalArgs;
+            for (const Conn& c : src.inputs) {
+                QString s = statefulSignal(c.refId, c.refPort, lines, visiting, called);
+                if (s.isEmpty()) {
+                    signal.clear();
+                    visiting.remove(refId);
+                    return signal;
+                }
+                if (!c.param.isEmpty())
+                    namedInputs[c.param] << s;
+                else
+                    positionalArgs << s;
+            }
+
+            auto mergeLocal = [](QStringList values, const QString& defaultValue) -> QString {
+                if (values.isEmpty()) return defaultValue;
+                if (values.size() == 1) return values.first();
+                for (QString& part : values)
+                    part = QString("(%1)").arg(part);
+                return values.join(" OR ");
+            };
+
+            if (src.instanceName.isEmpty()) {
+                if (src.typeName == "NOT") {
+                    QString in = mergeLocal(namedInputs.value("IN"), QString());
+                    if (in.isEmpty() && positionalArgs.size() == 1)
+                        in = positionalArgs.first();
+                    if (!in.isEmpty())
+                        signal = QString("NOT (%1)").arg(in);
+                } else if (src.typeName == "AND" || src.typeName == "OR") {
+                    QStringList args;
+                    for (const auto& [param, values] : namedInputs.asKeyValueRange()) {
+                        Q_UNUSED(param);
+                        args << mergeLocal(values, "FALSE");
+                    }
+                    args << positionalArgs;
+                    if (!args.isEmpty()) {
+                        for (QString& arg : args)
+                            arg = QString("(%1)").arg(arg);
+                        signal = args.join(src.typeName == "AND" ? " AND " : " OR ");
+                    }
+                }
+            } else {
+                if (!called.contains(refId)) {
+                    QStringList args;
+                    for (const auto& [param, values] : namedInputs.asKeyValueRange())
+                        args << QString("%1 := %2").arg(param, mergeLocal(values, "FALSE"));
+                    args << positionalArgs;
+                    lines << QString("%1(%2);").arg(src.instanceName, args.join(", "));
+                    called.insert(refId);
+                }
+                QString p = refPort.isEmpty()
+                    ? (src.outputPorts.isEmpty() ? "OUT" : src.outputPorts.first())
+                    : refPort;
+                signal = src.instanceName + "." + p;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        visiting.remove(refId);
+        return signal;
+    };
+
     // 解析所有节点
     for (QDomElement e = sfcEl.firstChildElement();
          !e.isNull(); e = e.nextSiblingElement())
@@ -714,6 +844,26 @@ static QStringList sfcToText(const QDomElement& sfcEl,
                     if (ok) {
                         QSet<int> visiting;
                         conditionText = simpleSignal(refId, con.attribute("formalParameter"), visiting);
+                        if (conditionText.isEmpty()) {
+                            QStringList conditionLines;
+                            QSet<int> statefulVisiting;
+                            QSet<int> calledBlocks;
+                            const QString signal = statefulSignal(refId,
+                                                                  con.attribute("formalParameter"),
+                                                                  conditionLines,
+                                                                  statefulVisiting,
+                                                                  calledBlocks);
+                            if (!signal.isEmpty() && !conditionLines.isEmpty()) {
+                                const QString temp = QString("TIZI_SFC_TRANS%1").arg(id);
+                                if (boolTemps && !boolTemps->contains(temp))
+                                    *boolTemps << temp;
+                                conditionLines << QString("%1 := %2;").arg(temp, signal);
+                                const QString actionName = QString("TIZI_TRANS%1_COND").arg(id);
+                                inlineActionDefs << qMakePair(actionName, conditionLines);
+                                generatedConditionActions[id] = actionName;
+                                conditionText = temp;
+                            }
+                        }
                     }
                 }
             }
@@ -761,6 +911,42 @@ static QStringList sfcToText(const QDomElement& sfcEl,
         }
     }
 
+    QMap<int, QList<QString>> generatedStepActions;
+    for (auto it = generatedConditionActions.cbegin(); it != generatedConditionActions.cend(); ++it) {
+        const int transitionId = it.key();
+        QList<int> sourceSteps;
+        for (QDomElement e = sfcEl.firstChildElement();
+             !e.isNull(); e = e.nextSiblingElement())
+        {
+            if (e.attribute("localId").toInt() != transitionId) continue;
+            for (const QDomElement& cpi : ch(e, "connectionPointIn")) {
+                QDomElement con = fc(cpi, "connection");
+                if (con.isNull()) continue;
+                int srcId = con.attribute("refLocalId").toInt();
+                if (steps.contains(srcId)) {
+                    sourceSteps << srcId;
+                } else {
+                    for (QDomElement e2 = sfcEl.firstChildElement();
+                         !e2.isNull(); e2 = e2.nextSiblingElement())
+                    {
+                        if (e2.attribute("localId").toInt() != srcId) continue;
+                        for (const QDomElement& cpi2 : ch(e2, "connectionPointIn")) {
+                            QDomElement con2 = fc(cpi2, "connection");
+                            if (!con2.isNull()) {
+                                int s2 = con2.attribute("refLocalId").toInt();
+                                if (steps.contains(s2))
+                                    sourceSteps << s2;
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        for (int stepId : sourceSteps)
+            generatedStepActions[stepId] << actionCall(it.value(), "N", {});
+    }
+
     // jumpStep 目标名
     QMap<int, QString> jumpTarget;
     for (const QDomElement& e : ch(sfcEl, "jumpStep"))
@@ -776,6 +962,8 @@ static QStringList sfcToText(const QDomElement& sfcEl,
         // 内联动作引用（生成唯一名称）
         auto acts = stepActCalls.value(id);
         for (const QString& act : acts)
+            out << "  " + act;
+        for (const QString& act : generatedStepActions.value(id))
             out << "  " + act;
 
         out << "END_STEP";
@@ -991,6 +1179,11 @@ static QStringList convertPou(const QDomElement& pouEl)
     }
     ActionStResult actionResult = convertPouActions(pouEl);
     QMap<QString, QString> transitionExprs = namedTransitionExpressions(pouEl);
+    QDomElement sfcEl = fc(body, "SFC");
+    QStringList sfcLines;
+    QStringList sfcBoolTemps;
+    if (!sfcEl.isNull())
+        sfcLines = sfcToText(sfcEl, transitionExprs, &sfcBoolTemps);
 
     // ── 头部关键字 ────────────────────────────────────────
     QString keyword, endKeyword;
@@ -1020,6 +1213,9 @@ static QStringList convertPou(const QDomElement& pouEl)
                  "VAR", false, out);
     QStringList tempNames = fbdResult.boolTemps;
     for (const QString& tempName : actionResult.boolTemps)
+        if (!tempNames.contains(tempName))
+            tempNames << tempName;
+    for (const QString& tempName : sfcBoolTemps)
         if (!tempNames.contains(tempName))
             tempNames << tempName;
     for (const QString& edgeName : fbdResult.edgeTemps)
@@ -1063,9 +1259,8 @@ static QStringList convertPou(const QDomElement& pouEl)
     }
 
     // SFC
-    QDomElement sfcEl = fc(body, "SFC");
     if (!sfcEl.isNull()) {
-        for (const QString& ln : sfcToText(sfcEl, transitionExprs))
+        for (const QString& ln : sfcLines)
             out << "  " + ln;
         for (const QString& ln : actionResult.lines)
             out << ln;
