@@ -61,6 +61,7 @@
 #include "../utils/TreeBranchStyle.h"
 #include "../core/compiler/CodeGenerator.h"
 #include "../core/compiler/StGenerator.h"
+#include "../sim/smartsim.h"
 #include "BlockPropertiesDialog.h"
 #include "../comm/DownloadDialog.h"
 
@@ -239,6 +240,12 @@ void MainWindow::setupMenuBar()
         setPlcRunState(PlcRunState::Stopped);
         statusBar()->showMessage("PLC stopped.", 3000);
     });
+
+    plcMenu->addSeparator();
+
+    auto* aSmartSim = plcMenu->addAction(
+        QIcon(":/images/Connect.png"), "SmartSim...");
+    connect(aSmartSim, &QAction::triggered, this, &MainWindow::openSmartSim);
 
     plcMenu->addSeparator();
 
@@ -1280,8 +1287,45 @@ void MainWindow::closeAllPouTabs()
         sw->disconnect(this);
 
     m_subWinPouMap.clear();
+    m_projPropSubWin = nullptr;
+    m_smartSimSubWin = nullptr;
     m_scene = nullptr;
     m_mdiArea->closeAllSubWindows();
+}
+
+// ============================================================
+// PC 仿真面板（单例）
+// ============================================================
+void MainWindow::openSmartSim()
+{
+    if (!m_project) {
+        QMessageBox::warning(this, "SmartSim", "Please create or open a project first.");
+        return;
+    }
+    if (m_project->filePath.isEmpty()) {
+        QMessageBox::warning(this, "SmartSim", "Please save the project before starting simulation.");
+        return;
+    }
+
+    ProjectManager::syncScenesBeforeSave(m_sceneMap);
+    m_project->saveToFile(m_project->filePath);
+
+    if (m_smartSimSubWin) {
+        m_mdiArea->setActiveSubWindow(m_smartSimSubWin);
+        return;
+    }
+
+    auto* panel = new SmartSimWidget(m_project);
+    m_smartSimSubWin = m_mdiArea->addSubWindow(panel);
+    m_smartSimSubWin->setAttribute(Qt::WA_DeleteOnClose);
+    m_smartSimSubWin->setWindowTitle("SmartSim - PC PLC Simulation");
+
+    connect(m_smartSimSubWin, &QObject::destroyed, this, [this] {
+        m_smartSimSubWin = nullptr;
+    });
+
+    m_smartSimSubWin->show();
+    m_mdiArea->setActiveSubWindow(m_smartSimSubWin);
 }
 
 // ============================================================

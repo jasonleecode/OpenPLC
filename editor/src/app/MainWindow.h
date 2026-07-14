@@ -17,6 +17,7 @@ class QPlainTextEdit;
 class QLabel;
 class PlcOpenViewer;
 class LadderView;
+class SmartSimWidget;
 
 // ─────────────────────────────────────────────────────────────
 // PLC 连接状态
@@ -76,6 +77,7 @@ private:
     void openPouTab(PouModel* pou);
     void closeAllPouTabs();
     void openProjectProperties();            // 打开项目属性面板（单例）
+    void openSmartSim();                     // 打开 PC 仿真面板（单例）
 
     // ---- POU 编辑器工厂 ----
     QWidget* createPouEditorWidget(PouModel* pou);
@@ -131,6 +133,8 @@ private:
 
     // 项目属性面板（单例子窗口）
     QMdiSubWindow* m_projPropSubWin = nullptr;
+    // PC 仿真面板（单例子窗口）
+    QMdiSubWindow* m_smartSimSubWin = nullptr;
 
     // 每个 MDI 子窗口对应的 PouModel
     QMap<QMdiSubWindow*, PouModel*> m_subWinPouMap;

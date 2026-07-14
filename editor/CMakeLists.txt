@@ -73,6 +73,8 @@ set(PROJECT_SOURCES
     src/core/compiler/CodeGenerator.cpp
     src/core/compiler/StGenerator.h
     src/core/compiler/StGenerator.cpp
+    src/sim/smartsim.h
+    src/sim/smartsim.cpp
 
     # Editor 元件（新增）
     src/editor/items/FunctionBlockItem.h
@@ -128,6 +130,7 @@ endif()
 target_compile_definitions(TiZi PRIVATE
     LIBRARY_XML_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/conf/library.xml"
     MATIEC_DIR="${TIZI_MATIEC_DIR}"
+    SIM_RUNTIME_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/sim_runtime"
     DRIVERS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/drivers"
     WASI_SDK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/wasm/wasi-sdk"
 )

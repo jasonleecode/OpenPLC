@@ -54,6 +54,8 @@ SimVar sim_vars[] = {
 
 下一阶段应扩展到 PLCopen 常见类型，包括 `SINT`、`USINT`、`UINT`、`UDINT`、`LINT`、`ULINT`、`TIME`、`STRING`，并在 UI 层保留完整 IEC 类型信息。
 
+SmartSim 面板当前可以从 runtime 的 `readVars` 回包刷新 DI/DO/AI/AO，但 I/O 分组仍然依赖变量名和类型的启发式判断。后续最好在变量声明或地址绑定里明确 `%IX/%QX/%IW/%QW`，让 UI 能精确区分数字输入、数字输出、模拟输入、模拟输出，而不是通过 `DI/DO/AI/AO`、`Q`、`out` 等命名约定推断。
+
 ## 运行时协议
 
 仿真进程使用 stdin/stdout，每行一个 JSON 对象。所有响应都包含 `ok` 字段。
@@ -148,3 +150,4 @@ SimVar sim_vars[] = {
 5. 增加断点或条件暂停能力。MVP 可以先在每个 scan 后暂停并由 editor 判断条件。
 6. 增加复杂 PLCopen LD/FBD/SFC fixture，覆盖 feedback loop、stateful FB、SFC action/transition、跨网络变量流。
 7. 将运行时协议错误码结构化，便于 UI 显示可操作的错误原因。
+8. 为变量声明或地址绑定补充 `%IX/%QX/%IW/%QW` 信息，并让 SmartSim 的 DI/DO/AI/AO 面板基于地址类型精确映射。
