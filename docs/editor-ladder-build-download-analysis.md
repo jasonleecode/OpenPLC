@@ -46,6 +46,12 @@ TCP 下载协议服务端测试：
 editor/tests/verify_tcp_runtime_server.sh
 ```
 
+Linux WAMR runtime 工具校验脚本：
+
+```bash
+editor/tests/verify_wamr_linux.sh
+```
+
 当前仓库里的 `editor/tools/wasm/wasi-sdk` 是指向 macOS 下载目录的断链；Linux 上需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定。
 
 默认使用：
@@ -243,6 +249,16 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - `verify_build_pipeline.sh` 会调用该测试，确保编译链路验证时同时检查 TCP 下载协议基础语义。
 - 该服务是桌面测试替身；真实 MCU Ethernet server 仍需要结合具体网络栈和硬件环境实现/验证。
 
+### 17. Linux WAMR runtime 工具校验
+
+原风险：仓库新增了 `editor/tools/wasm_linux`，但缺少自动检查确认 Linux `iwasm`、WAMR 头文件和静态库能在当前机器实际运行/链接。
+
+当前状态：
+
+- 新增 `verify_wamr_linux.sh`。
+- 脚本会检查 `iwasm` 是 Linux x86_64 ELF、版本为 `2.4.3`，并确认 `libiwasm.a` 与 `wasm_export.h`、`wasm_c_api.h`、`lib_export.h` 存在。
+- 脚本会编译并链接一个最小 C 程序调用 `wasm_runtime_get_version()`，确认 WAMR SDK 头文件和静态库组合可用。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -259,7 +275,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 
 ### 3. XCODE/WAMR 真实运行验证
 
-已有 XCODE 构建和镜像格式验证脚本，但当前机器缺少可用 Linux WASI-SDK，仓库内 `wamrc` 也是 macOS arm64 可执行文件。仍需要在安装工具链后验证：
+已有 XCODE 构建和镜像格式验证脚本，也已加入 Linux `iwasm` runtime 校验；但当前机器缺少可用 Linux WASI-SDK，仓库内 `wamrc` 也是 macOS arm64 可执行文件。仍需要在安装工具链后验证：
 
 - `verify_xcode_pipeline.sh` 的真实 wasm 编译路径
 - `.xcode.bin` 下载到 Runtime B 区

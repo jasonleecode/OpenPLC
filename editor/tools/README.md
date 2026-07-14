@@ -54,5 +54,5 @@ WAMR_IWASM=/path/to/iwasm WASI_SDK_DIR=/path/to/wasi-sdk editor/tests/verify_xco
 `editor/tools/wasm_linux/` contains Linux x86_64 WAMR `iwasm` runtime artifacts built from `wasm-micro-runtime` 2.4.3:
 
 ```bash
-editor/tools/wasm_linux/bin/iwasm --version
+editor/tests/verify_wamr_linux.sh
 ```
