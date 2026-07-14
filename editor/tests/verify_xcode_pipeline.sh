@@ -6,6 +6,7 @@ EDITOR_DIR="$ROOT_DIR/editor"
 QT_ROOT="${QT_ROOT:-$HOME/Qt/6.5.3/gcc_64}"
 MATIEC_DIR="$EDITOR_DIR/tools/matiec_linux"
 WASI_SDK="${WASI_SDK_DIR:-$EDITOR_DIR/tools/wasm/wasi-sdk}"
+IWASM="${WAMR_IWASM:-$EDITOR_DIR/tools/wasm_linux/bin/iwasm}"
 WORK_DIR="${TMPDIR:-/tmp}/tizi-xcode-pipeline-test"
 STGEN_BIN="$WORK_DIR/stgen_cli"
 PROJECT="${1:-$EDITOR_DIR/tests/fixtures/native_ld_edge_scan.tizi}"
@@ -29,6 +30,15 @@ if [[ ! -x "$WASI_SDK/bin/clang" ]]; then
         exit 1
     fi
     exit 0
+fi
+
+if [[ ! -x "$IWASM" ]]; then
+    echo "Skipping XCODE runtime execution check: iwasm not found or not executable." >&2
+    echo "Set WAMR_IWASM to a Linux iwasm binary to run this test." >&2
+    echo "Current WAMR_IWASM: $IWASM" >&2
+    if [[ "${REQUIRE_XCODE_TOOLS:-0}" == "1" ]]; then
+        exit 1
+    fi
 fi
 
 rm -rf "$WORK_DIR"
@@ -102,6 +112,11 @@ if [[ -x "$WASI_SDK/bin/llvm-objdump" ]]; then
     "$WASI_SDK/bin/llvm-objdump" -x "$WASM" > "$WORK_DIR/wasm-objdump.txt"
     grep -q "plc_init" "$WORK_DIR/wasm-objdump.txt"
     grep -q "plc_run" "$WORK_DIR/wasm-objdump.txt"
+fi
+
+if [[ -x "$IWASM" ]]; then
+    "$IWASM" --heap-size=65536 -f plc_init "$WASM" > "$WORK_DIR/iwasm-plc_init.out"
+    "$IWASM" --heap-size=65536 -f plc_run "$WASM" 10 > "$WORK_DIR/iwasm-plc_run.out"
 fi
 
 echo "XCODE pipeline verification passed."

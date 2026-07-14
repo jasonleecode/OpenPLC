@@ -43,6 +43,12 @@ editor/tests/verify_build_pipeline.sh
 WASI_SDK_DIR=/path/to/wasi-sdk editor/tests/verify_xcode_pipeline.sh
 ```
 
+If a different Linux WAMR runtime should be used for the runtime execution check:
+
+```bash
+WAMR_IWASM=/path/to/iwasm WASI_SDK_DIR=/path/to/wasi-sdk editor/tests/verify_xcode_pipeline.sh
+```
+
 `editor/tools/wasm/wamrc/` currently contains macOS arm64 `wamrc` binaries and is not usable on Linux.
 
 `editor/tools/wasm_linux/` contains Linux x86_64 WAMR `iwasm` runtime artifacts built from `wasm-micro-runtime` 2.4.3:
