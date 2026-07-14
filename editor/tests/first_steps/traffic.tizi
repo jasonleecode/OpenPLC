@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <project xmlns="http://www.plcopen.org/xml/tc6_0201" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.plcopen.org/xml/tc6_0201">
   <fileHeader author="" companyName="Beremiz" creationDateTime="2012-09-04T16:16:33" productName="Unnamed" productVersion="1"/>
-  <contentHeader comment="" modificationDateTime="2026-02-26T15:12:07" name="traffic_lights">
+  <contentHeader comment="" modificationDateTime="2026-07-14T17:59:45" name="traffic_lights">
     <coordinateInfo>
       <fbd>
         <scaling x="0" y="0"/>
@@ -1414,7 +1414,7 @@ You can find out or edit these IDs in Inkscape.]]></xhtml:p>
       </pou>
     </pous>
   </types>
-  <TiZiBuild cflags="" compiler="gcc" ldflags="" linker="gcc" targetType="Linux"/>
+  <TiZiBuild cflags="" compiler="gcc" driver="" ldflags="" linker="gcc" mode="NCC" targetType="Linux"/>
   <instances>
     <configurations>
       <configuration name="config">
