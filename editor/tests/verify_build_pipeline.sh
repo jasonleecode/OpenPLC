@@ -132,6 +132,68 @@ EDGE_TEST_C
     "$test_bin"
 }
 
+run_plcopen_feedback_test() {
+    local name="plcopen_first_steps_linux"
+    local test_c="$WORK_DIR/${name}_feedback_test.c"
+    local test_bin="$WORK_DIR/${name}_feedback_test"
+
+    cat > "$test_c" <<'FEEDBACK_TEST_C'
+#include "iec_std_lib.h"
+#include "POUS.h"
+#include <stdio.h>
+
+TIME __CURRENT_TIME;
+BOOL __DEBUG = 0;
+
+extern void config_init__(void);
+extern void config_run__(unsigned long tick);
+extern PLC_PRG RESOURCE1__PLC_TASK_INSTANCE;
+
+static int check_counter(const char *label, int expected_fbd, int expected_ld) {
+    int fbd = RESOURCE1__PLC_TASK_INSTANCE.CNT2.value;
+    int ld = RESOURCE1__PLC_TASK_INSTANCE.CNT5.value;
+    if (fbd != expected_fbd || ld != expected_ld) {
+        fprintf(stderr, "%s: expected CNT2=%d CNT5=%d, got CNT2=%d CNT5=%d\n",
+                label, expected_fbd, expected_ld, fbd, ld);
+        return 1;
+    }
+    return 0;
+}
+
+int main(void) {
+    int failures = 0;
+    config_init__();
+
+    RESOURCE1__PLC_TASK_INSTANCE.RESET.value = 0;
+    config_run__(0);
+    failures += check_counter("first scan", 1, 1);
+
+    config_run__(1);
+    failures += check_counter("second scan", 2, 2);
+
+    RESOURCE1__PLC_TASK_INSTANCE.RESET.value = 1;
+    config_run__(2);
+    failures += check_counter("reset scan", 17, 17);
+
+    RESOURCE1__PLC_TASK_INSTANCE.RESET.value = 0;
+    config_run__(3);
+    failures += check_counter("post-reset scan", 18, 18);
+
+    return failures == 0 ? 0 : 1;
+}
+FEEDBACK_TEST_C
+
+    gcc -w \
+        -I "$MATIEC_DIR/lib/C" \
+        -I "$WORK_DIR/${name}_iec2c" \
+        "$test_c" \
+        "$WORK_DIR/${name}_iec2c/config.c" \
+        "$WORK_DIR/${name}_iec2c/resource1.c" \
+        -o "$test_bin" \
+        -lm
+    "$test_bin"
+}
+
 run_case "plcopen_first_steps" "$EDITOR_DIR/tests/first_steps/plc.tizi"
 run_case "plcopen_first_steps_linux" "$EDITOR_DIR/tests/first_steps/plcc.tizi"
 run_case "plcopen_traffic" "$EDITOR_DIR/tests/first_steps/traffic.tizi"
@@ -187,6 +249,7 @@ compile_linux_driver "native_ld_multi_output_negation"
 compile_linux_driver "native_fbd_block_multi_input"
 compile_linux_driver "native_fbd_fb_multi_output"
 run_edge_scan_test
+run_plcopen_feedback_test
 
 echo "Build pipeline verification passed."
 echo "Artifacts: $WORK_DIR"
