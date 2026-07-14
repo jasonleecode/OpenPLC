@@ -352,6 +352,16 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 自动 action 会挂到 transition 的来源 step 上，例如 `traffic.tizi` 的 `GREEN` step 会调用 `TIZI_TRANS37_COND(N)`。
 - `verify_build_pipeline.sh` 已断言 `SR0`、`TON3`、`TIZI_SFC_TRANS37` 的生成形态。
 
+### 26. SFC 同一步骤多个 actionBlock
+
+原风险：PLCopen 允许同一个 step 连接多个 `actionBlock`。此前 `sfcToText()` 会用后一个 actionBlock 覆盖前一个，导致同一步骤上的部分 action 丢失。
+
+当前状态：
+
+- 同一 step 的多个 actionBlock 会追加合并。
+- 新增 `plcopen_sfc_multi_actionblock.tizi`，覆盖同一 initial step 同时调用 `Start_act0(N)` 和 `Start_act1(N)`。
+- fixture 继续通过 `iec2c` 和 Linux driver wrapper 编译。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -363,6 +373,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - 反馈回路已有 `CounterFBD` / `CounterLD` 最小运行回归；仍需更复杂环路样例
 - 图元多 `connectionPointOut` 与端口选择
 - SFC transition condition 中带 TON/SR 等有状态功能块的图形条件已有 `traffic.tizi` 回归；仍需更复杂多 transition 共享图形样例
+- SFC 多 actionBlock 已有最小 fixture 覆盖；仍需大型 PLCopen 样例回归
 
 ### 2. 边沿触点真实硬件行为需要确认
 

@@ -569,6 +569,7 @@ static QStringList sfcToText(const QDomElement& sfcEl,
     QMap<int, QList<QString>> stepActCalls; // stepLocalId → action calls
     QList<QPair<QString, QStringList>> inlineActionDefs;
     QMap<int, QString> generatedConditionActions;
+    QMap<int, int> inlineActionIndex;
 
     auto actionCall = [](const QString& name,
                          const QString& qualifier,
@@ -882,7 +883,8 @@ static QStringList sfcToText(const QDomElement& sfcEl,
                 QString code = cdata(stEl).trimmed();
                 if (!code.isEmpty()) {
                     const QString stepName = steps.value(stepId).name;
-                    const QString actionName = QString("%1_act%2").arg(stepName).arg(acts.size());
+                    const int actionIndex = inlineActionIndex[stepId]++;
+                    const QString actionName = QString("%1_act%2").arg(stepName).arg(actionIndex);
                     acts << actionCall(actionName, qualifier, duration);
                     inlineActionDefs << qMakePair(actionName, code.split('\n'));
                     continue;
@@ -893,7 +895,7 @@ static QStringList sfcToText(const QDomElement& sfcEl,
                 if (!refName.isEmpty())
                     acts << actionCall(refName, qualifier, duration);
             }
-            if (stepId >= 0) stepActCalls[stepId] = acts;
+            if (stepId >= 0) stepActCalls[stepId] << acts;
         }
     }
 

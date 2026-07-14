@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <fileHeader companyName="TiZi" productName="TiZi" productVersion="1"/>
+  <contentHeader name="sfc_multi_actionblock"/>
+  <types>
+    <dataTypes/>
+    <pous>
+      <pou name="main" pouType="program">
+        <interface>
+          <localVars>
+            <variable name="A">
+              <type>
+                <BOOL/>
+              </type>
+            </variable>
+            <variable name="B">
+              <type>
+                <BOOL/>
+              </type>
+            </variable>
+          </localVars>
+        </interface>
+        <body>
+          <SFC>
+            <step localId="1" name="Start" initialStep="true">
+              <connectionPointOutAction/>
+            </step>
+            <actionBlock localId="2">
+              <connectionPointIn>
+                <connection refLocalId="1"/>
+              </connectionPointIn>
+              <action localId="0" qualifier="N">
+                <inline>
+                  <ST>
+                    <xhtml:p><![CDATA[A := TRUE;]]></xhtml:p>
+                  </ST>
+                </inline>
+              </action>
+            </actionBlock>
+            <actionBlock localId="3">
+              <connectionPointIn>
+                <connection refLocalId="1"/>
+              </connectionPointIn>
+              <action localId="0" qualifier="N">
+                <inline>
+                  <ST>
+                    <xhtml:p><![CDATA[B := TRUE;]]></xhtml:p>
+                  </ST>
+                </inline>
+              </action>
+            </actionBlock>
+          </SFC>
+        </body>
+      </pou>
+    </pous>
+  </types>
+</project>
