@@ -124,6 +124,8 @@ struct Elem {
     QString instanceName;   // Block: 实例名（空 = 函数调用）
     QString expression;     // InVar/OutVar/InOutVar/Contact/Coil
     bool    negated = false;
+    bool    negatedIn = false;
+    bool    negatedOut = false;
     QString edge;           // Contact: none/rising/falling
     QString storage;        // Coil: none/set/reset
 
@@ -183,11 +185,14 @@ static QMap<int, Elem> parseFbd(const QDomElement& bodyEl)
         else if (tag == "outVariable") {
             el.kind       = Elem::OutVar;
             el.expression = fc(e, "expression").text().trimmed();
+            el.negated    = (e.attribute("negated") == "true");
             el.inputs     = inputConnections(e);
         }
         else if (tag == "inOutVariable") {
             el.kind       = Elem::InOutVar;
             el.expression = fc(e, "expression").text().trimmed();
+            el.negatedIn  = (e.attribute("negatedIn") == "true");
+            el.negatedOut = (e.attribute("negatedOut") == "true");
             el.inputs     = inputConnections(e);
         }
         else if (tag == "block") {
@@ -358,7 +363,9 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
                 ? QString("NOT %1").arg(src.expression)
                 : src.expression;
         case Elem::InOutVar:
-            return src.expression;
+            return src.negatedOut
+                ? QString("NOT %1").arg(src.expression)
+                : src.expression;
         case Elem::PowerRail:
             return "TRUE";
         case Elem::Block: {
@@ -417,6 +424,8 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
 
         case Elem::InOutVar: {
             QString s = inputSignal(el, {});
+            if (!s.isEmpty() && el.negatedIn)
+                s = QString("NOT (%1)").arg(s);
             if (!s.isEmpty() && s != el.expression)
                 result.lines << QString("  %1 := %2;").arg(el.expression, s);
             break;
@@ -519,6 +528,8 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
 
         case Elem::OutVar: {
             QString s = inputSignal(el, "FALSE");
+            if (!s.isEmpty() && el.negated)
+                s = QString("NOT (%1)").arg(s);
             if (!s.isEmpty())
                 result.lines << QString("  %1 := %2;").arg(el.expression, s);
             break;

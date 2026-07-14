@@ -16,6 +16,7 @@
 - PLCopen `traffic.tizi` SFC/FBD 混合示例：`StGenerator -> iec2iec -> iec2c -> Linux driver wrapper`
 - TiZi 原生 `<TiZiProject>` 最小 LD 示例：`StGenerator -> iec2iec -> iec2c`
 - TiZi 原生 LD 并联分支示例：多 `connectionPointIn`、falling edge、reset coil
+- TiZi 原生 LD 多输出示例：同一触点驱动多个线圈、变量输入/输出取反
 - TiZi 原生 FBD block 示例：同一 `formalParameter` 多连接合成为布尔 `OR`
 - TiZi 原生 LD 示例继续通过 Linux driver wrapper 编译为本机可执行文件
 - Qt Editor 目标：`cmake --build editor/build --target TiZi --parallel 2`
@@ -158,16 +159,25 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - `HMI_BOOL` 会在 ST 生成时降级为 IEC 标准 `BOOL`。
 - `traffic.tizi` 已加入 `verify_build_pipeline.sh`，覆盖 SFC/FBD 混合样例、标准库 FB、多输出端口引用和 Linux wrapper 编译。
 
+### 12. LD 多输出和变量取反
+
+原问题：`outVariable negated` 以及 `inOutVariable negatedIn/negatedOut` 被解析链路忽略，相关图元在生成 ST 时不会按 PLCopen 语义取反。
+
+当前状态：
+
+- `outVariable negated="true"` 会生成取反赋值。
+- `inOutVariable negatedIn="true"` 会在写入变量时取反。
+- `inOutVariable negatedOut="true"` 会在作为上游信号输出时取反。
+- 新增 `native_ld_multi_output_negation.tizi`，覆盖同一触点驱动多个线圈、取反线圈、`inOutVariable` 双向取反和 Linux wrapper 编译。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
 
 当前 `StGenerator` 已覆盖基础路径，但仍不是完整 PLCopen 图形语言编译器。需要继续测试：
 
-- 多输出线圈
 - block 多输出端口在大型 PLCopen 样例中的完整回归
 - 反馈回路
-- `inOutVariable` 复杂引用
 - 图元多 `connectionPointOut` 与端口选择
 
 ### 2. 边沿触点语义需要硬件/周期级确认

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TiZiProject name="NativeLDMultiOutputNegation" version="1" targetType="Linux" mode="NCC">
+  <pou name="main" type="program" language="LD">
+    <description>Native LD multi-output and variable negation compiler smoke test</description>
+    <variables>
+      <var name="A" class="Local" type="BOOL" init="" comment=""/>
+      <var name="B" class="Local" type="BOOL" init="" comment=""/>
+      <var name="Y1" class="Local" type="BOOL" init="" comment=""/>
+      <var name="Y2" class="Local" type="BOOL" init="" comment=""/>
+      <var name="Y3" class="Local" type="BOOL" init="" comment=""/>
+    </variables>
+    <graphical><![CDATA[LD
+<LD>
+  <leftPowerRail localId="1">
+    <connectionPointOut/>
+  </leftPowerRail>
+  <contact localId="2" negated="false" edge="none">
+    <variable>A</variable>
+    <connectionPointIn>
+      <connection refLocalId="1"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </contact>
+  <coil localId="3" negated="false" storage="none">
+    <variable>Y1</variable>
+    <connectionPointIn>
+      <connection refLocalId="2"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </coil>
+  <coil localId="4" negated="true" storage="none">
+    <variable>Y2</variable>
+    <connectionPointIn>
+      <connection refLocalId="2"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+  </coil>
+  <inOutVariable localId="5" negatedIn="true" negatedOut="true">
+    <connectionPointIn>
+      <connection refLocalId="2"/>
+    </connectionPointIn>
+    <connectionPointOut/>
+    <expression>B</expression>
+  </inOutVariable>
+  <outVariable localId="6" negated="true">
+    <connectionPointIn>
+      <connection refLocalId="5"/>
+    </connectionPointIn>
+    <expression>Y3</expression>
+  </outVariable>
+</LD>]]></graphical>
+  </pou>
+</TiZiProject>
