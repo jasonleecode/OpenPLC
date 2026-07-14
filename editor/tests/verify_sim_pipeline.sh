@@ -60,12 +60,12 @@ if not instance_match:
     raise SystemExit("cannot find RESOURCE1 program instance")
 
 program_type, instance_name = instance_match.groups()
-struct_match = re.search(
-    rf"typedef struct \{{(?P<body>.*?)\}}\s*{re.escape(program_type)};",
-    pous,
-    re.S,
-)
-if not struct_match:
+program_body = None
+for struct_match in re.finditer(r"typedef struct \{(?P<body>.*?)\}\s*(?P<type>[A-Z][A-Z0-9_]*);", pous, re.S):
+    if struct_match.group("type") == program_type:
+        program_body = struct_match.group("body")
+        break
+if program_body is None:
     raise SystemExit(f"cannot find struct for {program_type}")
 
 supported = {
@@ -77,7 +77,7 @@ supported = {
 }
 
 entries = []
-for iec_type, name in re.findall(r"__DECLARE_VAR\(([^,]+),([^)]+)\)", struct_match.group("body")):
+for iec_type, name in re.findall(r"__DECLARE_VAR\(([^,]+),([^)]+)\)", program_body):
     iec_type = iec_type.strip()
     name = name.strip()
     sim_type = supported.get(iec_type)

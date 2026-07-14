@@ -484,10 +484,17 @@ bool SmartSimWidget::generateSimVars(const QString& outDir, const QString& simVa
 
     const QString programType = instanceMatch.captured(1);
     const QString instanceName = instanceMatch.captured(2);
-    QRegularExpression structRe(
-        "typedef\\s+struct\\s*\\{([\\s\\S]*?)\\}\\s*" + QRegularExpression::escape(programType) + "\\s*;");
-    QRegularExpressionMatch structMatch = structRe.match(pous);
-    if (!structMatch.hasMatch()) {
+    QString programBody;
+    QRegularExpression structRe("typedef\\s+struct\\s*\\{([\\s\\S]*?)\\}\\s*([A-Z][A-Z0-9_]*)\\s*;");
+    QRegularExpressionMatchIterator structIt = structRe.globalMatch(pous);
+    while (structIt.hasNext()) {
+        const QRegularExpressionMatch m = structIt.next();
+        if (m.captured(2) == programType) {
+            programBody = m.captured(1);
+            break;
+        }
+    }
+    if (programBody.isEmpty()) {
         if (error) *error = "cannot find program struct";
         return false;
     }
@@ -502,7 +509,7 @@ bool SmartSimWidget::generateSimVars(const QString& outDir, const QString& simVa
 
     QStringList entries;
     QRegularExpression varRe("__DECLARE_VAR\\(([^,]+),([^)]+)\\)");
-    QRegularExpressionMatchIterator it = varRe.globalMatch(structMatch.captured(1));
+    QRegularExpressionMatchIterator it = varRe.globalMatch(programBody);
     while (it.hasNext()) {
         const QRegularExpressionMatch m = it.next();
         const QString iecType = m.captured(1).trimmed();

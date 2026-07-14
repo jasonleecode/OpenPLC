@@ -2,6 +2,7 @@
 *.d
 .claude/
 editor/build/
+**/.tizi_sim/
 runtime/build/
 
 # Compiled Object files
