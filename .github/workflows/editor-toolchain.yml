@@ -28,6 +28,7 @@ jobs:
           bash -n editor/tests/verify_toolchain_manifest.sh
           bash -n editor/tests/verify_wamr_linux.sh
           bash -n editor/tests/verify_xcode_pipeline.sh
+          bash -n editor/tests/verify_sim_pipeline.sh
 
       - name: Check whitespace
         run: git diff --check
@@ -40,6 +41,9 @@ jobs:
 
       - name: Verify TCP runtime protocol server
         run: editor/tests/verify_tcp_runtime_server.sh
+
+      - name: Verify simulation runtime pipeline
+        run: editor/tests/verify_sim_pipeline.sh
 
       - name: Verify Linux WAMR runtime tools
         run: editor/tests/verify_wamr_linux.sh
