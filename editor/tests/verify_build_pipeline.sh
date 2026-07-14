@@ -140,6 +140,7 @@ run_case "native_ld_edge_scan" "$EDITOR_DIR/tests/fixtures/native_ld_edge_scan.t
 run_case "native_ld_parallel_reset" "$EDITOR_DIR/tests/fixtures/native_ld_parallel_reset.tizi"
 run_case "native_ld_multi_output_negation" "$EDITOR_DIR/tests/fixtures/native_ld_multi_output_negation.tizi"
 run_case "native_fbd_block_multi_input" "$EDITOR_DIR/tests/fixtures/native_fbd_block_multi_input.tizi"
+run_case "native_fbd_fb_multi_output" "$EDITOR_DIR/tests/fixtures/native_fbd_fb_multi_output.tizi"
 
 grep -q "TIZI_TMP" "$WORK_DIR/native_ld.st"
 grep -q "TIZI_EDGE3" "$WORK_DIR/native_ld.st"
@@ -159,6 +160,9 @@ grep -q "Y3 := NOT (NOT B);" "$WORK_DIR/native_ld_multi_output_negation.st"
 
 grep -q "AND(IN1 := (A) OR (B), IN2 := C)" "$WORK_DIR/native_fbd_block_multi_input.st"
 grep -q "Y := AND" "$WORK_DIR/native_fbd_block_multi_input.st"
+grep -q "Counter(CU := CU, PV := 5, R := R);" "$WORK_DIR/native_fbd_fb_multi_output.st"
+grep -q "Done := Counter.Q;" "$WORK_DIR/native_fbd_fb_multi_output.st"
+grep -q "Count := Counter.CV;" "$WORK_DIR/native_fbd_fb_multi_output.st"
 grep -q "SwitchButton : BOOL;" "$WORK_DIR/plcopen_traffic.st"
 grep -q "INITIAL_STEP Standstill" "$WORK_DIR/plcopen_traffic.st"
 
@@ -169,6 +173,7 @@ compile_linux_driver "native_ld_edge_scan"
 compile_linux_driver "native_ld_parallel_reset"
 compile_linux_driver "native_ld_multi_output_negation"
 compile_linux_driver "native_fbd_block_multi_input"
+compile_linux_driver "native_fbd_fb_multi_output"
 run_edge_scan_test
 
 echo "Build pipeline verification passed."

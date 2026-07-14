@@ -19,6 +19,7 @@
 - TiZi 原生 LD 并联分支示例：多 `connectionPointIn`、falling edge、reset coil
 - TiZi 原生 LD 多输出示例：同一触点驱动多个线圈、变量输入/输出取反
 - TiZi 原生 FBD block 示例：同一 `formalParameter` 多连接合成为布尔 `OR`
+- TiZi 原生 FBD 功能块示例：同一功能块实例的多个输出端口 `Q` / `CV`
 - TiZi 原生 LD 示例继续通过 Linux driver wrapper 编译为本机可执行文件
 - Qt Editor 目标：`cmake --build editor/build --target TiZi --parallel 2`
 
@@ -279,6 +280,16 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - CI 覆盖 shell 语法、`git diff --check`、matiec 工具校验、TCP runtime 协议服务端测试、Linux WAMR runtime 工具校验。
 - XCODE 脚本在未安装 WASI-SDK 的 runner 上会验证 skip path；安装 native WASI-SDK 后可通过 `REQUIRE_XCODE_TOOLS=1` 扩展为强制验证。
 
+### 20. FBD 功能块多输出端口回归
+
+原风险：PLCopen/FBD 中功能块实例可暴露多个输出端口，例如 `CTU.Q` 与 `CTU.CV`。如果编译器只取首个输出端口，后续连接会生成空表达式或错误变量。
+
+当前状态：
+
+- 新增 `native_fbd_fb_multi_output.tizi`。
+- `verify_build_pipeline.sh` 会验证 `Counter(CU := CU, PV := 5, R := R);`、`Done := Counter.Q;`、`Count := Counter.CV;`。
+- fixture 继续通过 `iec2c` 和 Linux driver wrapper 编译。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足
@@ -286,6 +297,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 当前 `StGenerator` 已覆盖基础路径，但仍不是完整 PLCopen 图形语言编译器。需要继续测试：
 
 - block 多输出端口在大型 PLCopen 样例中的完整回归
+- block 多输出端口已有最小 CTU fixture 覆盖；仍需在大型 PLCopen 样例中完整回归
 - 反馈回路
 - 图元多 `connectionPointOut` 与端口选择
 

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TiZiProject name="NativeFBDFunctionBlockMultiOutput" version="1" targetType="Linux" mode="NCC">
+  <pou name="main" type="program" language="FBD">
+    <description>Native FBD function block multi-output compiler smoke test</description>
+    <variables>
+      <var name="CU" class="Local" type="BOOL" init="" comment=""/>
+      <var name="R" class="Local" type="BOOL" init="" comment=""/>
+      <var name="Done" class="Local" type="BOOL" init="" comment=""/>
+      <var name="Count" class="Local" type="INT" init="" comment=""/>
+      <var name="Counter" class="Local" type="CTU" init="" comment=""/>
+    </variables>
+    <graphical><![CDATA[FBD
+<FBD>
+  <inVariable localId="1" negated="false">
+    <connectionPointOut/>
+    <expression>CU</expression>
+  </inVariable>
+  <inVariable localId="2" negated="false">
+    <connectionPointOut/>
+    <expression>R</expression>
+  </inVariable>
+  <inVariable localId="3" negated="false">
+    <connectionPointOut/>
+    <expression>5</expression>
+  </inVariable>
+  <block localId="4" typeName="CTU" instanceName="Counter">
+    <inputVariables>
+      <variable formalParameter="CU">
+        <connectionPointIn>
+          <connection refLocalId="1"/>
+        </connectionPointIn>
+      </variable>
+      <variable formalParameter="R">
+        <connectionPointIn>
+          <connection refLocalId="2"/>
+        </connectionPointIn>
+      </variable>
+      <variable formalParameter="PV">
+        <connectionPointIn>
+          <connection refLocalId="3"/>
+        </connectionPointIn>
+      </variable>
+    </inputVariables>
+    <outputVariables>
+      <variable formalParameter="Q">
+        <connectionPointOut/>
+      </variable>
+      <variable formalParameter="CV">
+        <connectionPointOut/>
+      </variable>
+    </outputVariables>
+  </block>
+  <outVariable localId="5">
+    <connectionPointIn>
+      <connection formalParameter="Q" refLocalId="4"/>
+    </connectionPointIn>
+    <expression>Done</expression>
+  </outVariable>
+  <outVariable localId="6">
+    <connectionPointIn>
+      <connection formalParameter="CV" refLocalId="4"/>
+    </connectionPointIn>
+    <expression>Count</expression>
+  </outVariable>
+</FBD>]]></graphical>
+  </pou>
+</TiZiProject>
