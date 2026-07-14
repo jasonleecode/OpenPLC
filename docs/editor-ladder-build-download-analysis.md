@@ -269,6 +269,16 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - Linux XCODE 验证文案改为要求 native `WASI_SDK_DIR` / `WAMR_IWASM`。
 - Editor 找不到 WASI-SDK 时会明确提示设置 `WASI_SDK_DIR` 或安装到默认位置。
 
+### 19. Editor 工具链轻量 CI
+
+原风险：本地已有验证脚本，但远端提交/PR 没有自动检查，工具链文件或协议测试退化时只能靠人工运行脚本发现。
+
+当前状态：
+
+- 新增 `.github/workflows/editor-toolchain.yml`。
+- CI 覆盖 shell 语法、`git diff --check`、matiec 工具校验、TCP runtime 协议服务端测试、Linux WAMR runtime 工具校验。
+- XCODE 脚本在未安装 WASI-SDK 的 runner 上会验证 skip path；安装 native WASI-SDK 后可通过 `REQUIRE_XCODE_TOOLS=1` 扩展为强制验证。
+
 ## 剩余风险
 
 ### 1. 复杂 PLCopen LD/FBD 语义覆盖不足

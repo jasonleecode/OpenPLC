@@ -1,0 +1,44 @@
+name: Editor Toolchain
+
+on:
+  push:
+    paths:
+      - ".github/workflows/editor-toolchain.yml"
+      - "docs/editor-ladder-build-download-analysis.md"
+      - "editor/**"
+  pull_request:
+    paths:
+      - ".github/workflows/editor-toolchain.yml"
+      - "docs/editor-ladder-build-download-analysis.md"
+      - "editor/**"
+
+jobs:
+  editor-toolchain:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: |
+          bash -n editor/tests/verify_build_pipeline.sh
+          bash -n editor/tests/verify_matiec_tools.sh
+          bash -n editor/tests/verify_tcp_runtime_server.sh
+          bash -n editor/tests/verify_wamr_linux.sh
+          bash -n editor/tests/verify_xcode_pipeline.sh
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Verify matiec tools
+        run: editor/tests/verify_matiec_tools.sh
+
+      - name: Verify TCP runtime protocol server
+        run: editor/tests/verify_tcp_runtime_server.sh
+
+      - name: Verify Linux WAMR runtime tools
+        run: editor/tests/verify_wamr_linux.sh
+
+      - name: Verify XCODE script skip path
+        run: editor/tests/verify_xcode_pipeline.sh
