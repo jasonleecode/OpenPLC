@@ -143,6 +143,20 @@ static QList<Conn> inputConnections(const QDomElement& owner)
     return inputs;
 }
 
+static QList<Conn> blockInputConnections(const QDomElement& inputVar)
+{
+    QList<Conn> inputs;
+    const QString param = inputVar.attribute("formalParameter");
+    const QDomElement cpi = fc(inputVar, "connectionPointIn");
+    for (const QDomElement& con : ch(cpi, "connection")) {
+        bool ok = false;
+        const int refId = con.attribute("refLocalId").toInt(&ok);
+        if (!ok) continue;
+        inputs << Conn{refId, con.attribute("formalParameter"), param};
+    }
+    return inputs;
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // 解析 FBD/LD 体内的所有图元
 // ───────────────────────────────────────────────────────────────────────────
@@ -179,14 +193,7 @@ static QMap<int, Elem> parseFbd(const QDomElement& bodyEl)
 
             QDomElement inVars = fc(e, "inputVariables");
             for (const QDomElement& v : ch(inVars, "variable")) {
-                Conn c;
-                c.param = v.attribute("formalParameter");
-                QDomElement con = fc(fc(v, "connectionPointIn"), "connection");
-                if (!con.isNull()) {
-                    c.refId   = con.attribute("refLocalId").toInt();
-                    c.refPort = con.attribute("formalParameter");
-                }
-                el.inputs << c;
+                el.inputs << blockInputConnections(v);
             }
             QDomElement outVars = fc(e, "outputVariables");
             for (const QDomElement& v : ch(outVars, "variable"))
@@ -377,6 +384,24 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
         return parts.join(" OR ");
     };
 
+    auto connSignal = [&](const Conn& c) -> QString {
+        return sig(c.refId, c.refPort);
+    };
+
+    auto mergeSignals = [&](const QStringList& values,
+                            const QString& defaultValue) -> QString {
+        QStringList parts;
+        for (const QString& s : values) {
+            if (!s.isEmpty()) parts << s;
+        }
+        if (parts.isEmpty()) return defaultValue;
+        if (parts.size() == 1) return parts.first();
+
+        for (QString& part : parts)
+            part = QString("(%1)").arg(part);
+        return parts.join(" OR ");
+    };
+
     QList<int> order = topoSort(elems);
 
     for (int id : order) {
@@ -443,16 +468,25 @@ static FbdStResult fbdToSt(QMap<int, Elem>& elems)
         }
 
         case Elem::Block: {
-            QStringList args;
+            QMap<QString, QStringList> namedInputs;
+            QStringList positionalArgs;
             for (const Conn& c : el.inputs) {
                 if (c.refId < 0) continue;
-                QString s = sig(c.refId, c.refPort);
+                QString s = connSignal(c);
                 if (s.isEmpty()) s = "FALSE";
                 if (!c.param.isEmpty())
-                    args << QString("%1 := %2").arg(c.param, s);
+                    namedInputs[c.param] << s;
                 else
-                    args << s;
+                    positionalArgs << s;
             }
+
+            QStringList args;
+            for (const auto& [param, values] : namedInputs.asKeyValueRange()) {
+                QString s = mergeSignals(values, "FALSE");
+                args << QString("%1 := %2").arg(param, s);
+            }
+            args << positionalArgs;
+
             if (el.instanceName.isEmpty()) {
                 // 函数调用：检查输出是否被多次引用
                 QString port = el.outputPorts.isEmpty() ? "OUT" : el.outputPorts.first();

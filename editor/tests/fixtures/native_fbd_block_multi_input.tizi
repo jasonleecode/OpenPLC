@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TiZiProject name="NativeFBDBlockMultiInput" version="1" targetType="Linux" mode="NCC">
+  <pou name="main" type="program" language="FBD">
+    <description>Native FBD block formal parameter multi-input compiler smoke test</description>
+    <variables>
+      <var name="A" class="Local" type="BOOL" init="" comment=""/>
+      <var name="B" class="Local" type="BOOL" init="" comment=""/>
+      <var name="C" class="Local" type="BOOL" init="" comment=""/>
+      <var name="Y" class="Local" type="BOOL" init="" comment=""/>
+    </variables>
+    <graphical><![CDATA[FBD
+<FBD>
+  <inVariable localId="1" negated="false">
+    <connectionPointOut/>
+    <expression>A</expression>
+  </inVariable>
+  <inVariable localId="2" negated="false">
+    <connectionPointOut/>
+    <expression>B</expression>
+  </inVariable>
+  <inVariable localId="3" negated="false">
+    <connectionPointOut/>
+    <expression>C</expression>
+  </inVariable>
+  <block localId="4" typeName="AND">
+    <inputVariables>
+      <variable formalParameter="IN1">
+        <connectionPointIn>
+          <connection refLocalId="1"/>
+          <connection refLocalId="2"/>
+        </connectionPointIn>
+      </variable>
+      <variable formalParameter="IN2">
+        <connectionPointIn>
+          <connection refLocalId="3"/>
+        </connectionPointIn>
+      </variable>
+    </inputVariables>
+    <outputVariables>
+      <variable formalParameter="OUT">
+        <connectionPointOut/>
+      </variable>
+    </outputVariables>
+  </block>
+  <outVariable localId="5">
+    <connectionPointIn>
+      <connection formalParameter="OUT" refLocalId="4"/>
+    </connectionPointIn>
+    <expression>Y</expression>
+  </outVariable>
+</FBD>]]></graphical>
+  </pou>
+</TiZiProject>
