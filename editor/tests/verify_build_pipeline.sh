@@ -194,6 +194,74 @@ FEEDBACK_TEST_C
     "$test_bin"
 }
 
+run_fbd_multi_output_runtime_test() {
+    local name="native_fbd_fb_multi_output"
+    local test_c="$WORK_DIR/${name}_runtime_test.c"
+    local test_bin="$WORK_DIR/${name}_runtime_test"
+
+    cat > "$test_c" <<'MULTI_OUTPUT_TEST_C'
+#include "iec_std_lib.h"
+#include "POUS.h"
+#include <stdio.h>
+
+TIME __CURRENT_TIME;
+BOOL __DEBUG = 0;
+
+extern void config_init__(void);
+extern void config_run__(unsigned long tick);
+extern MAIN RESOURCE1__MAIN_INSTANCE;
+
+static int check_state(const char *label, int expected_count, int expected_done) {
+    int count = RESOURCE1__MAIN_INSTANCE.COUNT.value;
+    int done = RESOURCE1__MAIN_INSTANCE.DONE.value;
+    int mirror = RESOURCE1__MAIN_INSTANCE.DONEMIRROR.value;
+    if (count != expected_count || done != expected_done || mirror != expected_done) {
+        fprintf(stderr, "%s: expected COUNT=%d DONE=%d DONEMIRROR=%d, got COUNT=%d DONE=%d DONEMIRROR=%d\n",
+                label, expected_count, expected_done, expected_done,
+                count, done, mirror);
+        return 1;
+    }
+    return 0;
+}
+
+static void scan(unsigned long tick, int cu, int reset) {
+    RESOURCE1__MAIN_INSTANCE.CU.value = cu;
+    RESOURCE1__MAIN_INSTANCE.R.value = reset;
+    config_run__(tick);
+}
+
+int main(void) {
+    int failures = 0;
+    config_init__();
+
+    scan(0, 0, 0);
+    failures += check_state("initial low", 0, 0);
+
+    for (int pulse = 1; pulse <= 5; ++pulse) {
+        scan((unsigned long)(pulse * 2 - 1), 1, 0);
+        failures += check_state("rising edge", pulse, pulse >= 5);
+        scan((unsigned long)(pulse * 2), 0, 0);
+        failures += check_state("falling edge", pulse, pulse >= 5);
+    }
+
+    scan(20, 0, 1);
+    failures += check_state("reset", 0, 0);
+
+    return failures == 0 ? 0 : 1;
+}
+MULTI_OUTPUT_TEST_C
+
+    gcc -w \
+        -I "$MATIEC_DIR/lib/C" \
+        -I "$WORK_DIR/${name}_iec2c" \
+        "$test_c" \
+        "$WORK_DIR/${name}_iec2c/config.c" \
+        "$WORK_DIR/${name}_iec2c/resource1.c" \
+        -o "$test_bin" \
+        -lm
+    "$test_bin"
+}
+
 run_case "plcopen_first_steps" "$EDITOR_DIR/tests/first_steps/plc.tizi"
 run_case "plcopen_first_steps_linux" "$EDITOR_DIR/tests/first_steps/plcc.tizi"
 run_case "plcopen_traffic" "$EDITOR_DIR/tests/first_steps/traffic.tizi"
@@ -225,6 +293,7 @@ grep -q "Y := AND" "$WORK_DIR/native_fbd_block_multi_input.st"
 grep -q "Counter(CU := CU, PV := 5, R := R);" "$WORK_DIR/native_fbd_fb_multi_output.st"
 grep -q "Done := Counter.Q;" "$WORK_DIR/native_fbd_fb_multi_output.st"
 grep -q "Count := Counter.CV;" "$WORK_DIR/native_fbd_fb_multi_output.st"
+grep -q "DoneMirror := Counter.Q;" "$WORK_DIR/native_fbd_fb_multi_output.st"
 grep -q "SwitchButton : BOOL;" "$WORK_DIR/plcopen_traffic.st"
 grep -q "INITIAL_STEP Standstill" "$WORK_DIR/plcopen_traffic.st"
 grep -q "BLINK_ORANGE_LIGHT(N);" "$WORK_DIR/plcopen_traffic.st"
@@ -256,6 +325,7 @@ compile_linux_driver "native_fbd_block_multi_input"
 compile_linux_driver "native_fbd_fb_multi_output"
 run_edge_scan_test
 run_plcopen_feedback_test
+run_fbd_multi_output_runtime_test
 
 echo "Build pipeline verification passed."
 echo "Artifacts: $WORK_DIR"

@@ -293,8 +293,9 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 当前状态：
 
 - 新增 `native_fbd_fb_multi_output.tizi`。
-- `verify_build_pipeline.sh` 会验证 `Counter(CU := CU, PV := 5, R := R);`、`Done := Counter.Q;`、`Count := Counter.CV;`。
+- `verify_build_pipeline.sh` 会验证 `Counter(CU := CU, PV := 5, R := R);`、`Done := Counter.Q;`、`DoneMirror := Counter.Q;`、`Count := Counter.CV;`。
 - fixture 继续通过 `iec2c` 和 Linux driver wrapper 编译。
+- 新增本机运行测试，驱动 CTU 上升沿计数到 5，确认 `Q` 的两个下游一致，`CV` 递增，reset 后清零。
 
 ### 21. 工具链 manifest
 
@@ -358,7 +359,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 当前 `StGenerator` 已覆盖基础路径，并已补充 PLCopen action/transition 图形体回归，但仍不是完整 PLCopen 图形语言编译器。需要继续测试：
 
 - block 多输出端口在大型 PLCopen 样例中的完整回归
-- block 多输出端口已有最小 CTU fixture 覆盖；仍需在大型 PLCopen 样例中完整回归
+- block 多输出端口/共享输出已有最小 CTU fixture 和运行回归；仍需在大型 PLCopen 样例中完整回归
 - 反馈回路已有 `CounterFBD` / `CounterLD` 最小运行回归；仍需更复杂环路样例
 - 图元多 `connectionPointOut` 与端口选择
 - SFC transition condition 中带 TON/SR 等有状态功能块的图形条件已有 `traffic.tizi` 回归；仍需更复杂多 transition 共享图形样例

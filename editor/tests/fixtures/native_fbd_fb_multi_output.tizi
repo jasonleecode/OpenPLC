@@ -6,6 +6,7 @@
       <var name="CU" class="Local" type="BOOL" init="" comment=""/>
       <var name="R" class="Local" type="BOOL" init="" comment=""/>
       <var name="Done" class="Local" type="BOOL" init="" comment=""/>
+      <var name="DoneMirror" class="Local" type="BOOL" init="" comment=""/>
       <var name="Count" class="Local" type="INT" init="" comment=""/>
       <var name="Counter" class="Local" type="CTU" init="" comment=""/>
     </variables>
@@ -61,6 +62,12 @@
       <connection formalParameter="CV" refLocalId="4"/>
     </connectionPointIn>
     <expression>Count</expression>
+  </outVariable>
+  <outVariable localId="7">
+    <connectionPointIn>
+      <connection formalParameter="Q" refLocalId="4"/>
+    </connectionPointIn>
+    <expression>DoneMirror</expression>
   </outVariable>
 </FBD>]]></graphical>
   </pou>
