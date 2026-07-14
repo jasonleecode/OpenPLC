@@ -34,6 +34,12 @@ XCODE/WASM 构建链路验证脚本：
 WASI_SDK_DIR=/path/to/wasi-sdk editor/tests/verify_xcode_pipeline.sh
 ```
 
+matiec 工具链校验脚本：
+
+```bash
+editor/tests/verify_matiec_tools.sh
+```
+
 当前仓库里的 `editor/tools/wasm/wasi-sdk` 是指向 macOS 下载目录的断链；Linux 上需要安装本机 WASI-SDK 并通过 `WASI_SDK_DIR` 指定。
 
 默认使用：
@@ -112,6 +118,7 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - CMake 按平台选择 `tools/matiec_linux` 或 `tools/matiec_mac`。
 - Runtime 查找时要求 `iec2iec` 和 `iec2c` 都存在且可执行。
 - 当前仓库已包含 `editor/tools/matiec_linux`。
+- 新增 `verify_matiec_tools.sh`，检查工具可执行性、平台二进制类型，并运行 `iec2iec` / `iec2c` smoke test。
 
 ### 7. B 区大小限制
 
@@ -231,9 +238,9 @@ QT_ROOT=/path/to/Qt/6.x/gcc_64 editor/tests/verify_build_pipeline.sh
 - WAMR/iwasm 加载镜像
 - `plc_init()` / `plc_run(ms)` 实际调用
 
-### 4. Linux matiec 二进制直接入库
+### 4. matiec 二进制交付方式
 
-当前方案能工作，但二进制入库会带来仓库体积和平台兼容风险。可选后续方案：
+当前方案能工作，并已增加工具链校验脚本；但二进制入库仍会带来仓库体积和平台兼容风险。可选后续方案：
 
 - 保留当前二进制，作为开发便利工具。
 - 增加构建脚本，从 matiec 源码构建本机工具。
