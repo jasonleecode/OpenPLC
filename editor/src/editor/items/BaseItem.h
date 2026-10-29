@@ -21,6 +21,7 @@ public:
 
 protected:
     static constexpr int GridSize  = 20;   // 必须与 LadderScene::GridSize 一致
+    static constexpr int MoveGridSize = 5; // 拖动时使用细网格，便于与连线对齐
     static constexpr int RungH     = 100;  // 必须与 LadderScene::RungHeight 一致
     static constexpr int RungBaseY = 50;   // 第一个梯级中心 Y（= RungH / 2）
 
@@ -33,20 +34,12 @@ protected:
         editProperties();
     }
 
-    // 位置变化时：X 吸附到网格，Y 吸附到最近梯级中心
+    // 位置变化时使用细网格吸附；放置元件/画线仍由场景使用 GridSize。
     QVariant itemChange(GraphicsItemChange change, const QVariant &value) override {
         if (change == ItemPositionChange && scene()) {
             QPointF p = value.toPointF();
-
-            // X: 20px 网格
-            qreal x = qRound(p.x() / GridSize) * (qreal)GridSize;
-
-            // Y: 端口对齐到最近梯级中心
-            qreal portY  = p.y() + portYOffset();
-            int   rung   = qRound((portY - RungBaseY) / (qreal)RungH);
-            rung = qMax(0, rung);
-            qreal y = RungBaseY + rung * RungH - portYOffset();
-
+            qreal x = qRound(p.x() / MoveGridSize) * (qreal)MoveGridSize;
+            qreal y = qRound(p.y() / MoveGridSize) * (qreal)MoveGridSize;
             return QPointF(x, y);
         }
         return QGraphicsObject::itemChange(change, value);

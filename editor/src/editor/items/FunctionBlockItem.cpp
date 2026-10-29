@@ -365,14 +365,14 @@ void FunctionBlockItem::setInstanceName(const QString& n) {
     update();
 }
 
-// X 和 Y 均吸附到 GridSize（20px）网格，不做梯级中心吸附
+// 拖动时使用细网格吸附，不做梯级中心吸附。
 QVariant FunctionBlockItem::itemChange(GraphicsItemChange change,
                                         const QVariant &value)
 {
     if (change == ItemPositionChange && scene()) {
         QPointF p = value.toPointF();
-        qreal x = qRound(p.x() / GridSize) * (qreal)GridSize;
-        qreal y = qRound(p.y() / GridSize) * (qreal)GridSize;
+        qreal x = qRound(p.x() / MoveGridSize) * (qreal)MoveGridSize;
+        qreal y = qRound(p.y() / MoveGridSize) * (qreal)MoveGridSize;
         return QPointF(x, y);
     }
     return QGraphicsObject::itemChange(change, value);

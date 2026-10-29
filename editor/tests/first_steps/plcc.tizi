@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <project xmlns="http://www.plcopen.org/xml/tc6_0201" xmlns:ns1="http://www.plcopen.org/xml/tc6_0201" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <fileHeader author="" companyName="Beremiz" creationDateTime="2016-10-24T18:09:22" productName="Beremiz" productVersion="1"/>
-  <contentHeader comment="" modificationDateTime="2026-07-14T16:12:26" name="First Steps">
+  <contentHeader comment="" modificationDateTime="2026-10-29T17:30:04" name="First Steps">
     <coordinateInfo>
       <fbd>
         <scaling x="0" y="0"/>
@@ -999,6 +999,7 @@ ST Out
                 <relPosition x="0" y="15"/>
                 <connection refLocalId="3">
                   <position x="527" y="102"/>
+                  <position x="485" y="102"/>
                   <position x="443" y="102"/>
                 </connection>
               </connectionPointIn>
@@ -1010,6 +1011,7 @@ ST Out
                 <relPosition x="0" y="15"/>
                 <connection formalParameter="OUT" refLocalId="7">
                   <position x="409" y="102"/>
+                  <position x="388" y="102"/>
                   <position x="367" y="102"/>
                 </connection>
               </connectionPointIn>
@@ -1025,7 +1027,9 @@ ST Out
                   <connectionPointIn>
                     <relPosition x="0" y="35"/>
                     <connection refLocalId="6">
-                      <position x="180" y="122"/>
+                      <position x="180" y="125"/>
+                      <position x="154" y="125"/>
+                      <position x="154" y="122"/>
                       <position x="127" y="122"/>
                     </connection>
                   </connectionPointIn>
@@ -1034,11 +1038,9 @@ ST Out
                   <connectionPointIn>
                     <relPosition x="0" y="65"/>
                     <connection refLocalId="3">
-                      <position x="180" y="152"/>
-                      <position x="169" y="152"/>
-                      <position x="169" y="185"/>
-                      <position x="453" y="185"/>
-                      <position x="453" y="102"/>
+                      <position x="180" y="155"/>
+                      <position x="312" y="155"/>
+                      <position x="312" y="102"/>
                       <position x="443" y="102"/>
                     </connection>
                   </connectionPointIn>
@@ -1075,8 +1077,8 @@ ST Out
                     <relPosition x="0" y="30"/>
                     <connection refLocalId="9">
                       <position x="300" y="102"/>
-                      <position x="266" y="102"/>
-                      <position x="266" y="62"/>
+                      <position x="217" y="102"/>
+                      <position x="217" y="62"/>
                       <position x="134" y="62"/>
                     </connection>
                   </connectionPointIn>
@@ -1086,7 +1088,9 @@ ST Out
                     <relPosition x="0" y="50"/>
                     <connection formalParameter="OUT" refLocalId="4">
                       <position x="300" y="122"/>
-                      <position x="247" y="122"/>
+                      <position x="274" y="122"/>
+                      <position x="274" y="125"/>
+                      <position x="247" y="125"/>
                     </connection>
                   </connectionPointIn>
                 </variable>
@@ -1123,7 +1127,8 @@ ST Out
                 <relPosition x="0" y="8"/>
                 <connection refLocalId="8">
                   <position x="113" y="62"/>
-                  <position x="49" y="62"/>
+                  <position x="81" y="62"/>
+                  <position x="50" y="62"/>
                 </connection>
               </connectionPointIn>
               <connectionPointOut>
