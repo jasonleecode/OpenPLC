@@ -38,12 +38,7 @@ void ProjectManager::syncScenesBeforeSave(const QMap<PouModel*, PlcOpenViewer*>&
 // ============================================================
 void ProjectManager::newProject()
 {
-    if (m_project && m_project->isDirty()) {
-        const int ret = QMessageBox::question(m_parent, "New Project",
-            "Current project has unsaved changes. Discard them?",
-            QMessageBox::Yes | QMessageBox::No);
-        if (ret != QMessageBox::Yes) return;
-    }
+    if (!confirmSaveChanges()) return;
 
     const QString name = QInputDialog::getText(
         m_parent, "New Project", "Project name:", QLineEdit::Normal, "Untitled");
@@ -52,7 +47,7 @@ void ProjectManager::newProject()
     auto* proj = new ProjectModel(nullptr);
     proj->projectName = name.trimmed();
     PouModel* pou = proj->addPou("main", PouType::Program, PouLanguage::LD);
-    proj->clearDirty();
+    // A new untitled project also needs an opportunity to be saved.
 
     m_project = proj;
     emit projectCreated(proj);
@@ -75,6 +70,9 @@ void ProjectManager::openProject()
 
 bool ProjectManager::openProject(const QString& path)
 {
+    // Saving may update the very file being opened (e.g. Open Recent).
+    // Read it only after the user's save decision has completed.
+    if (!confirmSaveChanges()) return false;
     auto* proj = new ProjectModel(nullptr);
     if (!proj->loadFromFile(path)) {
         QMessageBox::critical(m_parent, "Open Error",
@@ -95,40 +93,46 @@ bool ProjectManager::openProject(const QString& path)
 // ============================================================
 // 保存（覆盖）
 // ============================================================
-void ProjectManager::saveProject()
+bool ProjectManager::saveProject()
 {
-    if (!m_project) return;
-    if (m_project->filePath.isEmpty()) {
-        saveProjectAs();
-        return;
-    }
-    doSaveTo(m_project->filePath);
+    if (!m_project) return false;
+    if (m_project->filePath.isEmpty()) return saveProjectAs();
+    return doSaveTo(m_project->filePath);
 }
 
-// ============================================================
-// 另存为
-// ============================================================
-void ProjectManager::saveProjectAs()
+bool ProjectManager::saveProjectAs()
 {
-    if (!m_project) return;
+    if (!m_project) return false;
     const QString path = QFileDialog::getSaveFileName(
         m_parent, "Save Project As", m_project->projectName + ".tizi",
         "TiZi Project (*.tizi);;XML Files (*.xml);;All Files (*)");
-    if (path.isEmpty()) return;
-    doSaveTo(path);
+    if (path.isEmpty()) return false;
+    return doSaveTo(path);
 }
 
-void ProjectManager::doSaveTo(const QString& path)
+bool ProjectManager::confirmSaveChanges()
 {
-    if (m_sceneMap)
-        syncScenesBeforeSave(*m_sceneMap);
+    if (!m_project || !m_project->isDirty()) return true;
+    const auto choice = QMessageBox::warning(m_parent, "Unsaved Changes",
+        "Save changes to " + m_project->projectName + "?",
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (choice == QMessageBox::Save) return saveProject();
+    return choice == QMessageBox::Discard;
+}
+
+bool ProjectManager::doSaveTo(const QString& path)
+{
+    if (m_sceneMap) syncScenesBeforeSave(*m_sceneMap);
     if (!m_project->saveToFile(path)) {
         QMessageBox::critical(m_parent, "Save Error",
-            QString("Failed to save:\n%1").arg(path));
-        return;
+            QString("Failed to save:\n%1\n%2").arg(path, m_project->errorString()));
+        return false;
     }
+    if (m_sceneMap)
+        for (auto* scene : *m_sceneMap) if (scene) scene->undoStack()->setClean();
     emit titleUpdateNeeded();
     emit statusMessage("Saved.", 3000);
+    return true;
 }
 
 // ============================================================

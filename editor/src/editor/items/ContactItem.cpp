@@ -1,3 +1,4 @@
+#include "../../utils/UndoStack.h"
 #include "ContactItem.h"
 
 #include <QPainter>
@@ -87,8 +88,10 @@ QPointF ContactItem::leftPort()  const { return mapToScene(0,    m_h / 2.0); }
 QPointF ContactItem::rightPort() const { return mapToScene(m_w,  m_h / 2.0); }
 
 void ContactItem::setTagName(const QString &name) {
+    if (m_tagName == name) return;
     m_tagName = name;
     update();
+    emit contentChanged();
 }
 
 void ContactItem::editProperties() {
@@ -98,5 +101,5 @@ void ContactItem::editProperties() {
         "Variable name (e.g. Reset):",
         QLineEdit::Normal, m_tagName, &ok);
     if (ok && !text.isEmpty())
-        setTagName(text);
+        editItemText(this, m_tagName, text, [this](const QString& value) { setTagName(value); });
 }

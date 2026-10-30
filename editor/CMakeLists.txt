@@ -62,6 +62,7 @@ set(PROJECT_SOURCES
     src/editor/scene/LadderView.h
     src/editor/scene/PlcOpenViewer.h
     src/editor/scene/PlcOpenViewer.cpp
+    src/editor/scene/PlcOpenSerialization.cpp
     src/editor/items/BaseItem.h
     src/editor/items/ContactItem.h
     src/editor/items/ContactItem.cpp
@@ -168,3 +169,19 @@ install(TARGETS TiZi
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
 )
+
+option(TIZI_BUILD_TESTS "Build editor persistence regression tests" OFF)
+if(TIZI_BUILD_TESTS)
+    enable_testing()
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    set(TEST_SOURCES ${PROJECT_SOURCES})
+    list(REMOVE_ITEM TEST_SOURCES src/main.cpp)
+    add_executable(TiZiPersistenceTests tests/editor_persistence_test.cpp ${TEST_SOURCES})
+    get_target_property(EDITOR_DEFINITIONS TiZi COMPILE_DEFINITIONS)
+    get_target_property(EDITOR_LIBRARIES TiZi LINK_LIBRARIES)
+    target_compile_definitions(TiZiPersistenceTests PRIVATE ${EDITOR_DEFINITIONS}
+        TIZI_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(TiZiPersistenceTests PRIVATE ${EDITOR_LIBRARIES} Qt6::Test)
+    add_test(NAME editor_persistence COMMAND TiZiPersistenceTests)
+    set_tests_properties(editor_persistence PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+endif()

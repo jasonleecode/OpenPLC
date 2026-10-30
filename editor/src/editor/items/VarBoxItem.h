@@ -1,5 +1,6 @@
 #pragma once
 #include "BaseItem.h"
+#include "../../utils/UndoStack.h"
 #include <QString>
 #include <QPainter>
 #include <QStyleOptionGraphicsItem>
@@ -60,14 +61,15 @@ public:
     QString expression() const { return m_expr; }
     Role    role()       const { return m_role; }
 
-    void setExpression(const QString& e) { m_expr = e; update(); }
+    void setExpression(const QString& e) { if (m_expr == e) return; m_expr = e; update(); emit contentChanged(); }
 
     void editProperties() override {
         bool ok;
         const QString text = QInputDialog::getText(
             nullptr, "Edit Variable",
             "Expression:", QLineEdit::Normal, m_expr, &ok);
-        if (ok && !text.isEmpty()) setExpression(text);
+        if (ok && !text.isEmpty())
+            editItemText(this, m_expr, text, [this](const QString& value) { setExpression(value); });
     }
 
     enum { Type = UserType + 5 };

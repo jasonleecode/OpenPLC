@@ -31,6 +31,7 @@ public:
     QList<VariableDecl> variables;
     QString        code;          // ST/IL 的文本内容
     QString        graphicalXml; // LD/FBD/SFC 的 PLCopen XML 图形体（原始 XML 字符串）
+    QDomElement    sourceElement; // Stable imported identity, independent of editable name.
 
     // ---- 枚举 ↔ 字符串转换（用于 XML） ----
     static QString    typeToString(PouType t);

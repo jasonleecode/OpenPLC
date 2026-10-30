@@ -1,74 +1,35 @@
-一、可以直接删除的死代码（无争议）
+# 代码整理清单复核
 
-  ┌─────────────────────────────┬─────────────────────────────────────────────────────┐
-  │            文件             │                        原因                         │
-  ├─────────────────────────────┼─────────────────────────────────────────────────────┤
-  │ core/models/CircuitGraph.h  │ 只有注释，无任何实现                                │
-  ├─────────────────────────────┼─────────────────────────────────────────────────────┤
-  │ core/models/LadderElement.h │ 同上                                                │
-  ├─────────────────────────────┼─────────────────────────────────────────────────────┤
-  │ core/models/Rung.h          │ 同上                                                │
-  ├─────────────────────────────┼─────────────────────────────────────────────────────┤
-  │ app/ProjectManager.cpp      │ 只有注释，项目管理功能已全部在 MainWindow 实现      │
-  ├─────────────────────────────┼─────────────────────────────────────────────────────┤
-  │ editor/items/RailItem.cpp   │ 只有注释，母线绘制在 LadderScene::drawBackground 里 │
-  ├─────────────────────────────┼─────────────────────────────────────────────────────┤
-  │ utils/XmlSerializer.cpp     │ 只有注释，XML 读写在 ProjectModel 里                │
-  └─────────────────────────────┴─────────────────────────────────────────────────────┘
+日期：2026-10-29；基线：04f28a1。本文件替代旧的“六个文件可无争议删除”结论。功能排序见 [todo.md](todo.md)，证据见 [architectural-review.md](architectural-review.md)。
 
-  这六个文件内容为零，删除毫无风险。
+2026-10-30 更新：ProjectManager 的未保存确认/错误传播、ProjectModel 与图形保存一致性已完成 P0 修复。图形序列化已提取至 `editor/src/editor/scene/PlcOpenSerialization.cpp`，验证见 [回归记录](../docs/editor-persistence.md)；下表其余结构整理建议仍保留。
 
-  > 回答：
+## 文件与职责
 
+以下路径除特别说明外相对 editor/src。
 
-  ---
-  二、需要你澄清意图的文件
+| 旧记录 | 当前情况 | 建议 |
+|---|---|---|
+| core/models/CircuitGraph.h 空壳 | 仍为占位文本，无实现 | P3 清理候选；先检查引用 |
+| core/models/LadderElement.h 空壳 | 仍为占位文本，无实现 | 同上 |
+| core/models/Rung.h 空壳 | 仍为占位文本，无实现 | 同上 |
+| app/ProjectManager.cpp 空壳，可删除 | **错误**：已实现新建/打开/保存/默认项目/场景同步，被 MainWindow 与 CMake 使用 | 保留；修复未保存提示和保存完整性 |
+| editor/items/RailItem.cpp 空壳 | 仍为占位文本，未列入当前 CMake | 清理候选；不能推断母线功能不存在 |
+| utils/XmlSerializer.cpp 空壳 | 仍为占位文本；序列化在 ProjectModel/PlcOpenViewer | 清理候选，实际保存缺陷另行修复 |
+| editor/tools/device.cpp、drivers.cpp 为空 | 正确完整路径是 editor/src/editor/tools/，均为空 | 不阻断功能；提取设备/驱动服务时决定替代或删除 |
+| plugins/plugins.cpp 为空 | 确实为空，未找到插件加载接口 | 保留插件规划；XML 库和 driver.json 不等于通用插件系统 |
+| sim/smartsim.cpp 只有注释、定位待定 | **错误**：约 995 行，承担本机仿真构建、进程、I/O 和调试交互 | 保留；PC 仿真定位已明确，不能等同真机在线调试 |
+| CodeGenerator / StGenerator 并行？ | 未找到 CodeGenerator::generate 业务调用；其头文件仍被包含、源文件仍被编译；实际 Build 使用 StGenerator | 旧路径清理候选；旧生成器问题不等于主编译链失效 |
+| MainWindow 约 2200 行且包办项目管理 | 当前约 3503 行；项目生命周期已部分委托 ProjectManager，构建/UI/驱动/连接等仍集中 | 按功能边界逐步拆分，不先大重构 |
+| LadderView 应重命名 | 命名偏好，非功能故障 | P3，不挤占保存、通信、测试 |
 
-  1. editor/tools/device.cpp 和 drivers.cpp（两个空文件）
+“未调用/未列入构建”来自本次静态搜索，不代表删除没有兼容成本。本次没有删除功能源文件。
 
-  这个 editor/tools/ 目录下放的是空壳，当初设计这两个文件的意图是什么？
+## 优先厘清的边界
 
-  - device.cpp：是打算做"已连接设备管理"（类似设备配置、在线状态）？还是跟 comm/ 里的传输层重叠？
-  - drivers.cpp：是打算做 driver 枚举/加载的逻辑层（现在散落在 MainWindow 里的 lambda）？
+1. ProjectModel / PlcOpenViewer / UndoStack：统一编辑结果保存语义，避免场景和 XML 互不一致。
+2. 连接会话：让 MainWindow 状态、DownloadDialog 和 PlcProtocol 使用明确的目标与设备回包。
+3. 仿真符号表：编辑器已有 C++ generateSimVars，测试脚本仍有另一套生成逻辑；后续共享实现，避免二者偏离。
+4. 构建与驱动服务：在修复工具链选择、安装验证、产物身份时提取，不机械拆文件。
 
-  我的疑问：现在 driver 的安装和枚举逻辑都内联在 MainWindow 的 lambda 里，如果 drivers.cpp
-  的意图是把这部分抽出来，其实是合理的重构方向。但如果只是历史占位，直接删掉更干净。
-
-  ---
-  2. plugins/plugins.cpp（空文件）
-
-  插件系统是未来规划还是已经放弃？TiZi 是否打算支持第三方扩展（比如自定义功能块库、自定义传输协议）？
-
-  ---
-  3. sim/smartsim.cpp（只有两行注释，提到"Smart Simulation Engine"）
-
-  SmartSim 的定位是什么？
-  - 软 PLC 仿真：在 PC 上离线运行 PLC 逻辑，用于调试（无需实体硬件）？
-  - 在线监视：连接真实 PLC 后实时监视变量值？
-  - 还是别的？
-
-  这直接影响它在架构里的位置（属于 core/ 还是独立的 sim/）。
-
-  ---
-  1. CodeGenerator vs StGenerator 的职责边界
-
-  - StGenerator：PLCopen XML → ST 文本（走 matiec 流水线，最终输出可执行文件）
-  - CodeGenerator：直接从 LD 图形场景生成 C 代码（绕过 matiec）
-
-  目前 buildProject() 调用的是 StGenerator 流水线，CodeGenerator 是否还在被调用？它的定位是什么——调试工具？还是并行的编译路径？
-
-  ---
-  三、结构性建议（供讨论，不一定要改）
-
-  MainWindow 过大（约 2200 行）混杂了：
-  1. UI 布局初始化（setupXxx 系列）
-  2. 项目操作（new/open/save/build/download）
-  3. POU 编辑器工厂（createPouEditorWidget 等）
-  4. PLC 连接状态机
-  5. 图标生成（makeLdIcon）
-  6. 安装 driver 逻辑
-
-  这些责任分散意味着改任何一处都要在同一个巨型文件里操作。是否考虑适度拆分？
-
-  LadderView 的命名：它同时服务于 LadderScene 和 PlcOpenViewer，叫 GraphicsView 或 PlcView
-  会更准确。但这是纯命名问题，改动成本低。
+旧清单中“ProjectModel 做文件 I/O 就是职责混乱”不再作为缺陷判据；关注保存正确性、错误传播和生命周期。

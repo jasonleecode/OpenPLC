@@ -27,6 +27,7 @@
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsView>
 #include <QKeyEvent>
+#include <QSignalBlocker>
 #include <algorithm>
 #include "../../utils/UndoStack.h"
 
@@ -50,7 +51,7 @@ public:
                PlcOpenViewer::FbdConn conn, QUndoCommand* parent = nullptr)
         : QUndoCommand("Add Wire", parent)
         , m_scene(scene), m_wire(wire), m_conn(conn) {}
-    ~AddWireCmd() override { if (m_ownWire) delete m_wire; }
+    ~AddWireCmd() override { if (m_ownWire) { m_scene->forgetEditorItem(m_wire); delete m_wire; } }
     void redo() override {
         m_conn.wire = m_wire;
         m_scene->addItem(m_wire);
@@ -162,10 +163,40 @@ PlcOpenViewer::PlcOpenViewer(QObject* parent)
     m_wireTimer = new QTimer(this);
     m_wireTimer->setSingleShot(true);
     m_wireTimer->setInterval(0);
-    connect(m_wireTimer, &QTimer::timeout,
-            this, &PlcOpenViewer::updateAllWires);
+    connect(m_wireTimer, &QTimer::timeout, this, [this] { updateAllWires(false); });
 
     // m_undoStack 已由 LadderScene 构造函数创建
+}
+
+PlcOpenViewer::~PlcOpenViewer()
+{
+    m_wireTimer->stop();
+    const QSignalBlocker blocker(this);
+    m_undoStack->clear();
+}
+
+void PlcOpenViewer::forgetEditorItem(QGraphicsItem* item)
+{
+    for (int i = m_connections.size() - 1; i >= 0; --i)
+        if (m_connections[i].wire == item) m_connections.removeAt(i);
+    LadderScene::forgetEditorItem(item);
+}
+
+QList<QGraphicsItem*> PlcOpenViewer::deletionItems(const QList<QGraphicsItem*>& items) const
+{
+    auto result = items;
+    for (const auto& c : m_connections) {
+        if (c.wire && c.wire->scene() == this &&
+            (items.contains(m_items.value(c.srcId)) || items.contains(m_items.value(c.dstId))) &&
+            !result.contains(c.wire)) result.append(c.wire);
+    }
+    return result;
+}
+
+void PlcOpenViewer::editorContentChanged()
+{
+    updateAllWires(false);
+    LadderScene::editorContentChanged();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -191,17 +222,24 @@ void PlcOpenViewer::drawBackground(QPainter* painter, const QRectF& rect)
 // ─────────────────────────────────────────────────────────────
 void PlcOpenViewer::loadFromXmlString(const QString& xmlBody)
 {
+    const QSignalBlocker blocker(this);
     // 先清理连接表（wire 指针即将因 clear() 失效）
+    m_wireTimer->stop();
     m_connections.clear();
-    clear();
     m_undoStack->clear();
+    m_tempWire = nullptr;
+    m_wirePoints.clear();
+    m_dragStartPos.clear();
+    m_epDragIdx = m_segDragIdx = m_horizDragIdx = -1;
+    clear();
     m_outPort.clear();
     m_namedOutPort.clear();
     m_items.clear();
-    m_isNewScene = false;   // PLCopen 加载的场景，走 syncPositionsToDoc 路径
 
     int nl = xmlBody.indexOf('\n');
     m_bodyLanguage = xmlBody.left(nl).trimmed().toUpper();
+    m_readOnly = m_bodyLanguage == "SFC";
+    m_mode = Mode_Select;
     const QString xml  = xmlBody.mid(nl + 1);
 
     m_bodyDoc = QDomDocument();
@@ -216,11 +254,21 @@ void PlcOpenViewer::loadFromXmlString(const QString& xmlBody)
         return;
     }
 
+    // Reserve IDs of unrendered nodes too: new items must not overwrite them.
+    for (auto e = body.firstChildElement(); !e.isNull(); e = e.nextSiblingElement())
+        if (e.hasAttribute("localId")) m_nextLocalId = qMax(m_nextLocalId, e.attribute("localId").toInt() + 1);
+
     if (m_bodyLanguage == "SFC")
         buildSfc(body);
     else
         buildFbd(body);
 
+    for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
+        it.value()->setData(1, findElemById(body, it.key()).tagName());
+        trackEditorItem(it.value());
+    }
+    if (m_readOnly)
+        for (auto* item : items()) item->setFlag(QGraphicsItem::ItemIsMovable, false);
     // 根据实际内容更新 sceneRect
     QRectF bounds = itemsBoundingRect();
     if (!bounds.isEmpty())
@@ -270,10 +318,8 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
         // ── 功能块（block）──────────────────────────────────────
         if (tag == "block") {
             const QString typeName = e.attribute("typeName");
-            // 若 PLCopen XML 中没有 instanceName（标准函数常见），自动生成唯一名
+            // Missing instanceName denotes a function, not an FB instance.
             QString instanceName = e.attribute("instanceName");
-            if (instanceName.isEmpty())
-                instanceName = QString("%1_%2").arg(typeName).arg(m_fbCount++);
 
             QStringList      inNames, outNames;
             QVector<QPointF> inRelPts, outRelPts;
@@ -320,8 +366,10 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
             const QString varName = e.firstChildElement("variable").text();
             bool negated = (e.attribute("negated","false") == "true");
 
-            auto* ct = new ContactItem(
-                negated ? ContactItem::NormalClosed : ContactItem::NormalOpen);
+            auto kind = negated ? ContactItem::NormalClosed : ContactItem::NormalOpen;
+            if (e.attribute("edge") == "rising") kind = ContactItem::PositiveTransition;
+            if (e.attribute("edge") == "falling") kind = ContactItem::NegativeTransition;
+            auto* ct = new ContactItem(kind);
             ct->setTagName(varName);
             ct->setExplicitSize(xw, xh);
             ct->setData(0, lid);
@@ -379,7 +427,7 @@ void PlcOpenViewer::createFbdItems(const QDomElement& body)
         else if (tag == "coil") {
             const QString varName = e.firstChildElement("variable").text();
             const QString storage = e.attribute("storage");
-            CoilItem::CoilType ctype = CoilItem::Output;
+            CoilItem::CoilType ctype = e.attribute("negated") == "true" ? CoilItem::Negated : CoilItem::Output;
             if (storage == "set")   ctype = CoilItem::SetCoil;
             if (storage == "reset") ctype = CoilItem::ResetCoil;
 
@@ -502,7 +550,9 @@ void PlcOpenViewer::drawFbdWires(const QDomElement& body)
                         wire->setPath(routeHvh(src, dst));
                 }
 
-                m_connections << FbdConn{refId, fp, lid, dstFp, wire};
+                FbdConn binding{refId, fp, lid, dstFp, wire};
+                binding.sourceConnection = conn;
+                m_connections << binding;
             }
         };
 
@@ -515,7 +565,7 @@ void PlcOpenViewer::drawFbdWires(const QDomElement& body)
                             iv.attribute("formalParameter"));
             }
         }
-        else if (tag == "outVariable" || tag == "inOutVariable" || tag == "contact") {
+        else if (tag == "outVariable" || tag == "inOutVariable" || tag == "contact" || tag == "coil" || tag == "rightPowerRail") {
             processConn(e.firstChildElement("connectionPointIn"), "");
         }
     }
@@ -761,6 +811,7 @@ QPointF PlcOpenViewer::getOutputPortScene(int lid, const QString& param) const
     }
     if (auto* vb = qgraphicsitem_cast<VarBoxItem*>(gi))   return vb->rightPort();
     if (auto* ct = qgraphicsitem_cast<ContactItem*>(gi))  return ct->rightPort();
+    if (auto* coil = qgraphicsitem_cast<CoilItem*>(gi)) return coil->rightPort();
 
     QRectF r = gi->sceneBoundingRect();
     return { r.right(), r.center().y() };
@@ -778,6 +829,8 @@ QPointF PlcOpenViewer::getInputPortScene(int lid, const QString& param) const
     }
     if (auto* vb = qgraphicsitem_cast<VarBoxItem*>(gi))  return vb->leftPort();
     if (auto* ct = qgraphicsitem_cast<ContactItem*>(gi)) return ct->leftPort();
+    if (auto* coil = qgraphicsitem_cast<CoilItem*>(gi)) return coil->leftPort();
+    if (auto* rail = dynamic_cast<QGraphicsRectItem*>(gi)) return rail->mapToScene(rail->rect().left(), rail->rect().center().y());
 
     return {-1e9, -1e9};
 }
@@ -800,7 +853,7 @@ static QPainterPath buildWirePath(const QPointF& src, const QPointF& dst,
     return path;
 }
 
-void PlcOpenViewer::updateAllWires()
+void PlcOpenViewer::updateAllWires(bool reroute)
 {
     if (m_updatingWires) return;
     m_updatingWires = true;
@@ -813,6 +866,10 @@ void PlcOpenViewer::updateAllWires()
             c.wire->setPath(QPainterPath());
             continue;
         }
+        const auto oldPath = c.wire->path();
+        if (!reroute && oldPath.elementCount() >= 2 &&
+            QLineF(QPointF(oldPath.elementAt(0)), src).length() < 0.01 &&
+            QLineF(oldPath.currentPosition(), dst).length() < 0.01) continue;
         qreal midX = qIsNaN(c.customMidX) ? (src.x() + dst.x()) / 2.0 : c.customMidX;
         c.wire->setPath(buildWirePath(src, dst, midX, c.srcJogY, c.dstJogY));
     }
@@ -854,6 +911,9 @@ PlcOpenViewer::PortRef PlcOpenViewer::findPortAt(const QPointF& pos, qreal radiu
         } else if (auto* coil = qgraphicsitem_cast<CoilItem*>(gi)) {
             check(lid, {}, false, coil->leftPort());
             check(lid, {}, true,  coil->rightPort());
+        } else if (dynamic_cast<QGraphicsRectItem*>(gi)) {
+            if (gi->data(1).toString() == "rightPowerRail") check(lid, {}, false, getInputPortScene(lid, {}));
+            else check(lid, {}, true, getOutputPortScene(lid, {}));
         }
     }
     return best;
@@ -935,7 +995,8 @@ void PlcOpenViewer::mousePressEvent(QGraphicsSceneMouseEvent* event)
                 PortRef srcPort = findPortAt(m_wirePoints.first(), 20.0);
                 PortRef dstPort = findPortAt(m_wirePoints.last(),  20.0);
 
-                if (m_wirePoints.size() == 2 && srcPort.valid() && dstPort.valid()) {
+                if (srcPort.valid() && dstPort.valid() && srcPort.isOutput != dstPort.isOutput) {
+                    if (!srcPort.isOutput) wire->setPath(path.toReversed());
                     int     sid = srcPort.isOutput ? srcPort.lid : dstPort.lid;
                     QString sp  = srcPort.isOutput ? srcPort.param : dstPort.param;
                     int     did = srcPort.isOutput ? dstPort.lid : srcPort.lid;
@@ -943,7 +1004,7 @@ void PlcOpenViewer::mousePressEvent(QGraphicsSceneMouseEvent* event)
                     FbdConn conn{ sid, sp, did, dp, nullptr, qQNaN() };
                     m_undoStack->push(new AddWireCmd(this, wire, conn));
                 } else {
-                    m_undoStack->push(new AddItemCmd(this, wire, "Add Wire"));
+                    delete wire;
                 }
             } else {
                 // 点数不足：取消
@@ -1285,239 +1346,29 @@ QDomElement PlcOpenViewer::findElemById(const QDomElement& root, int lid)
     return {};
 }
 
-void PlcOpenViewer::syncPositionsToDoc()
-{
-    if (m_bodyDoc.isNull()) return;
-    QDomElement root = m_bodyDoc.documentElement();
-
-    for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
-        QDomElement elem = findElemById(root, it.key());
-        if (elem.isNull()) continue;
-
-        QPointF p = it.value()->pos() / kScale;
-        QDomElement posEl = elem.firstChildElement("position");
-        if (!posEl.isNull()) {
-            posEl.setAttribute("x", QString::number(qRound(p.x())));
-            posEl.setAttribute("y", QString::number(qRound(p.y())));
-        }
-    }
-}
-
-void PlcOpenViewer::syncWirePathsToDoc()
-{
-    if (m_bodyDoc.isNull()) return;
-    QDomElement root = m_bodyDoc.documentElement();
-
-    for (const FbdConn& c : m_connections) {
-        if (!c.wire) continue;
-        QPainterPath path = c.wire->path();
-        if (path.elementCount() < 2) continue;
-
-        QDomElement dstElem = findElemById(root, c.dstId);
-        if (dstElem.isNull()) continue;
-
-        QDomElement connElem;
-        if (dstElem.tagName() == "block") {
-            QDomElement inVars = dstElem.firstChildElement("inputVariables");
-            QDomNodeList vars = inVars.elementsByTagName("variable");
-            for (int k = 0; k < vars.count() && connElem.isNull(); ++k) {
-                QDomElement v = vars.at(k).toElement();
-                if (v.attribute("formalParameter") != c.dstParam) continue;
-                QDomElement cpIn = v.firstChildElement("connectionPointIn");
-                QDomNodeList conns = cpIn.elementsByTagName("connection");
-                for (int j = 0; j < conns.count(); ++j) {
-                    QDomElement conn = conns.at(j).toElement();
-                    if (conn.attribute("refLocalId", "-1").toInt() == c.srcId) {
-                        connElem = conn; break;
-                    }
-                }
-            }
-        } else {
-            QDomElement cpIn = dstElem.firstChildElement("connectionPointIn");
-            QDomNodeList conns = cpIn.elementsByTagName("connection");
-            for (int j = 0; j < conns.count(); ++j) {
-                QDomElement conn = conns.at(j).toElement();
-                if (conn.attribute("refLocalId", "-1").toInt() == c.srcId) {
-                    connElem = conn; break;
-                }
-            }
-        }
-        if (connElem.isNull()) continue;
-
-        QList<QDomNode> toRemove;
-        QDomNodeList posElems = connElem.childNodes();
-        for (int k = 0; k < posElems.count(); ++k) {
-            QDomElement pe = posElems.at(k).toElement();
-            if (!pe.isNull() && pe.tagName() == "position")
-                toRemove << pe;
-        }
-        for (QDomNode n : toRemove)
-            connElem.removeChild(n);
-
-        int n = path.elementCount();
-        for (int i = n - 1; i >= 0; --i) {
-            QPainterPath::Element el = path.elementAt(i);
-            QDomElement posEl = m_bodyDoc.createElement("position");
-            posEl.setAttribute("x", QString::number(qRound(el.x / kScale)));
-            posEl.setAttribute("y", QString::number(qRound(el.y / kScale)));
-            connElem.appendChild(posEl);
-        }
-    }
-}
-
-QString PlcOpenViewer::toXmlString()
-{
-    if (m_bodyLanguage.isEmpty()) return {};
-
-    if (m_isNewScene) {
-        buildBodyFromScene();
-    } else {
-        syncPositionsToDoc();
-        syncWirePathsToDoc();
-    }
-    return m_bodyLanguage + "\n" + m_bodyDoc.toString(2);
-}
-
-void PlcOpenViewer::buildBodyFromScene()
-{
-    m_bodyDoc = QDomDocument();
-    QDomElement root = m_bodyDoc.createElement(m_bodyLanguage);
-    m_bodyDoc.appendChild(root);
-
-    auto addPos = [&](QDomElement& parent, QPointF scenePos) {
-        QDomElement pos = m_bodyDoc.createElement("position");
-        pos.setAttribute("x", QString::number(scenePos.x() / kScale, 'f', 0));
-        pos.setAttribute("y", QString::number(scenePos.y() / kScale, 'f', 0));
-        parent.appendChild(pos);
-    };
-
-    for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
-        const int lid = it.key();
-        QGraphicsItem* gi = it.value();
-
-        if (auto* ct = qgraphicsitem_cast<ContactItem*>(gi)) {
-            QDomElement e = m_bodyDoc.createElement("contact");
-            e.setAttribute("localId", lid);
-            bool neg = (ct->contactType() == ContactItem::NormalClosed);
-            e.setAttribute("negated", neg ? "true" : "false");
-            QString edge = "none";
-            if (ct->contactType() == ContactItem::PositiveTransition) edge = "rising";
-            if (ct->contactType() == ContactItem::NegativeTransition) edge = "falling";
-            e.setAttribute("edge", edge);
-            addPos(e, gi->pos());
-            QDomElement var = m_bodyDoc.createElement("variable");
-            var.appendChild(m_bodyDoc.createTextNode(ct->tagName()));
-            e.appendChild(var);
-            e.appendChild(m_bodyDoc.createElement("connectionPointIn"));
-            e.appendChild(m_bodyDoc.createElement("connectionPointOut"));
-            root.appendChild(e);
-
-        } else if (auto* co = qgraphicsitem_cast<CoilItem*>(gi)) {
-            QDomElement e = m_bodyDoc.createElement("coil");
-            e.setAttribute("localId", lid);
-            bool neg = (co->coilType() == CoilItem::Negated);
-            e.setAttribute("negated", neg ? "true" : "false");
-            QString storage = "none";
-            if (co->coilType() == CoilItem::SetCoil)   storage = "set";
-            if (co->coilType() == CoilItem::ResetCoil) storage = "reset";
-            e.setAttribute("storage", storage);
-            addPos(e, gi->pos());
-            QDomElement var = m_bodyDoc.createElement("variable");
-            var.appendChild(m_bodyDoc.createTextNode(co->tagName()));
-            e.appendChild(var);
-            e.appendChild(m_bodyDoc.createElement("connectionPointIn"));
-            e.appendChild(m_bodyDoc.createElement("connectionPointOut"));
-            root.appendChild(e);
-
-        } else if (auto* fb = qgraphicsitem_cast<FunctionBlockItem*>(gi)) {
-            QDomElement e = m_bodyDoc.createElement("block");
-            e.setAttribute("localId", lid);
-            e.setAttribute("typeName", fb->blockType());
-            e.setAttribute("instanceName", fb->instanceName());
-            addPos(e, gi->pos());
-            root.appendChild(e);
-
-        } else if (auto* vb = qgraphicsitem_cast<VarBoxItem*>(gi)) {
-            QString tag = (vb->role() == VarBoxItem::InVar)    ? "inVariable"  :
-                          (vb->role() == VarBoxItem::OutVar)   ? "outVariable" : "inOutVariable";
-            QDomElement e = m_bodyDoc.createElement(tag);
-            e.setAttribute("localId", lid);
-            addPos(e, gi->pos());
-            QDomElement expr = m_bodyDoc.createElement("expression");
-            expr.appendChild(m_bodyDoc.createTextNode(vb->expression()));
-            e.appendChild(expr);
-            if (vb->role() != VarBoxItem::InVar)
-                e.appendChild(m_bodyDoc.createElement("connectionPointIn"));
-            if (vb->role() != VarBoxItem::OutVar)
-                e.appendChild(m_bodyDoc.createElement("connectionPointOut"));
-            root.appendChild(e);
-
-        } else {
-            // leftPowerRail（raw QGraphicsRectItem）
-            QDomElement e = m_bodyDoc.createElement("leftPowerRail");
-            e.setAttribute("localId", lid);
-            QRectF br = gi->boundingRect();
-            e.setAttribute("width",  QString::number(br.width()  / kScale, 'f', 0));
-            e.setAttribute("height", QString::number(br.height() / kScale, 'f', 0));
-            addPos(e, gi->pos());
-            QDomElement cpOut = m_bodyDoc.createElement("connectionPointOut");
-            cpOut.setAttribute("formalParameter", "");
-            e.appendChild(cpOut);
-            root.appendChild(e);
-        }
-    }
-
-    // 处理用户画的导线：匹配端口坐标 → 写入目标元素的 <connectionPointIn>
-    const qreal tol = 15.0;
-    for (QGraphicsItem* gi : items()) {
-        if (gi->type() != WireItem::Type) continue;
-        auto* wire = static_cast<WireItem*>(gi);
-        QPointF startPt = wire->startPos();
-        QPointF endPt   = wire->endPos();
-
-        int srcId = -1;
-        for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
-            QPointF rp = getOutputPortScene(it.key(), {});
-            if (rp.x() < -1e8) continue;
-            if ((rp - startPt).manhattanLength() < tol) { srcId = it.key(); break; }
-        }
-
-        int dstId = -1;
-        for (auto it = m_items.cbegin(); it != m_items.cend(); ++it) {
-            QPointF lp = getInputPortScene(it.key(), {});
-            if (lp.x() < -1e8) continue;
-            if ((lp - endPt).manhattanLength() < tol) { dstId = it.key(); break; }
-        }
-
-        if (srcId < 0 || dstId < 0) continue;
-
-        QDomElement dstElem = findElemById(root, dstId);
-        if (dstElem.isNull()) continue;
-
-        QDomElement cpIn = dstElem.firstChildElement("connectionPointIn");
-        if (cpIn.isNull()) continue;
-
-        QDomElement conn = m_bodyDoc.createElement("connection");
-        conn.setAttribute("refLocalId", srcId);
-        conn.setAttribute("formalParameter", "");
-        cpIn.appendChild(conn);
-    }
-}
-
 // ── 空白画布初始化 ─────────────────────────────────────────────
 void PlcOpenViewer::initEmpty(const QString& lang)
 {
+    const QSignalBlocker blocker(this);
+    m_wireTimer->stop();
     m_connections.clear();
-    clear();
     m_undoStack->clear();
+    m_tempWire = nullptr;
+    m_wirePoints.clear();
+    m_dragStartPos.clear();
+    m_epDragIdx = m_segDragIdx = m_horizDragIdx = -1;
+    clear();
     m_outPort.clear();
     m_namedOutPort.clear();
     m_items.clear();
 
     m_bodyLanguage = lang.toUpper().isEmpty() ? "LD" : lang.toUpper();
+    m_readOnly = m_bodyLanguage == "SFC";
+    m_mode = Mode_Select;
     m_bodyDoc      = QDomDocument();
     m_bodyDoc.appendChild(m_bodyDoc.createElement(m_bodyLanguage));
-    m_isNewScene   = true;
+
+    if (m_readOnly || m_bodyLanguage != "LD") return;
 
     // 左电源母线（放在左上角，用户可自由移动）
     auto* rail = new QGraphicsRectItem(0, 0, 8, 240);
@@ -1528,6 +1379,8 @@ void PlcOpenViewer::initEmpty(const QString& lang)
     rail->setPos(40, 40);
     int lid = m_nextLocalId++;
     rail->setData(0, lid);
+    rail->setData(1, "leftPowerRail");
     m_items[lid] = rail;
     addItem(rail);
+    trackEditorItem(rail);
 }

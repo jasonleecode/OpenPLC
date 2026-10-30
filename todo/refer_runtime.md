@@ -1,3 +1,13 @@
+# Runtime A/B 分区历史设计参考
+
+> 2026-10-29 复核：下文是 STM32 示例方案，不是当前平台参数，也不表示这些功能尚未实现。不要将示例中的 Flash/RAM 地址用于 LPC824。
+>
+> 当前仓库已具备 A/B 接口表、B 区 RAM 初始化 wrapper、UART 下载/擦写/CRC/复位代码。实际 LPC824 地址、容量和 API 以 [shared_interface.h](../runtime/shared_interface.h)、[runtime.c](../runtime/app/runtime.c) 和 [生成 wrapper](../editor/tests/drivers/lpc824/templates/user_logic_wrapper.c) 为准。
+>
+> 真机 I/O 映射、周期一致性、在线程序身份以及硬件验收仍需补齐；本次没有进行烧录验证。当前事实见 [逐项复盘](architectural-review.md)，任务见 [todo.md](todo.md)。
+
+---
+
 一个非常经典且可行的嵌入式架构设计，通常被称为**“固件与应用分离”或“可加载模块”设计。在工业控制领域（如PLC）中，这正是Runtime（运行时系统/解释器）与User Logic（用户逻辑）**分离的核心实现方式。
 
 要实现你的需求（A保持不变，只更新B，且A能调用B），核心在于解决两个问题：

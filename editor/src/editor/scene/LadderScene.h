@@ -44,6 +44,16 @@ class LadderScene : public QGraphicsScene {
     Q_OBJECT
 public:
     explicit LadderScene(QObject *parent = nullptr);
+    ~LadderScene() override;
+
+    // Commands and import use the same active-item registry. Detached items are
+    // owned by undo commands and must never be serialized.
+    void attachEditorItem(QGraphicsItem* item);
+    void detachEditorItem(QGraphicsItem* item);
+    void trackEditorItem(QGraphicsItem* item);
+    virtual void forgetEditorItem(QGraphicsItem* item);
+    virtual QList<QGraphicsItem*> deletionItems(const QList<QGraphicsItem*>& items) const;
+    virtual void editorContentChanged();
 
     // ── LD 布局常量 ─────────────────────────────────────────────
     static const int GridSize    = 20;
@@ -57,12 +67,14 @@ public:
     EditorMode currentMode() const { return m_mode; }
 
     QUndoStack* undoStack() const { return m_undoStack; }
+    bool isReadOnly() const { return m_readOnly; }
 
     // 从拖放操作（Library→Canvas）创建功能块并加入撤销栈
     void addFunctionBlock(const QString& typeName, const QPointF& scenePos);
 
 signals:
     void modeChanged(EditorMode mode);
+    void contentChanged();
 
 protected:
     // 虚函数：子类可覆盖（PlcOpenViewer 覆盖为简单点阵）
@@ -79,6 +91,7 @@ protected:
 
     // ── 共享编辑状态（子类直接访问）────────────────────────────
     EditorMode m_mode         = Mode_Select;
+    bool m_readOnly = false;
     WireItem*  m_tempWire     = nullptr;
     QPointF    m_portSnapPos;
     bool       m_showPortSnap = false;

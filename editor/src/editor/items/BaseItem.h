@@ -19,6 +19,9 @@ public:
     // 右键菜单 / 双击编辑：弹出属性对话框（子类重写）
     virtual void editProperties() {}
 
+signals:
+    void contentChanged();
+
 protected:
     static constexpr int GridSize  = 20;   // 必须与 LadderScene::GridSize 一致
     static constexpr int MoveGridSize = 5; // 拖动时使用细网格，便于与连线对齐

@@ -1,3 +1,4 @@
+#include "../../utils/UndoStack.h"
 #include "CoilItem.h"
 
 #include <QPainter>
@@ -70,8 +71,10 @@ QPointF CoilItem::leftPort()  const { return mapToScene(0, H/2); }
 QPointF CoilItem::rightPort() const { return mapToScene(W, H/2); }
 
 void CoilItem::setTagName(const QString &name) {
+    if (m_tagName == name) return;
     m_tagName = name;
     update();
+    emit contentChanged();
 }
 
 void CoilItem::editProperties() {
@@ -81,5 +84,5 @@ void CoilItem::editProperties() {
         "Variable name (e.g. Motor_On):",
         QLineEdit::Normal, m_tagName, &ok);
     if (ok && !text.isEmpty())
-        setTagName(text);
+        editItemText(this, m_tagName, text, [this](const QString& value) { setTagName(value); });
 }

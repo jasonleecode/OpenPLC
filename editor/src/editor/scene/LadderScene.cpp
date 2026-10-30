@@ -26,6 +26,55 @@ LadderScene::LadderScene(QObject *parent)
     m_gridColorFine   = QColor("#E0E0E0");
 
     m_undoStack = new QUndoStack(this);
+    connect(m_undoStack, &QUndoStack::indexChanged, this, [this] { editorContentChanged(); });
+}
+
+LadderScene::~LadderScene()
+{
+    m_undoStack->clear();
+}
+
+void LadderScene::trackEditorItem(QGraphicsItem* item)
+{
+    if (item->data(0).isValid()) {
+        const int id = item->data(0).toInt();
+        m_items[id] = item;
+        m_nextLocalId = qMax(m_nextLocalId, id + 1);
+    }
+    if (auto* base = dynamic_cast<BaseItem*>(item)) {
+        connect(base, &BaseItem::contentChanged, this, &LadderScene::editorContentChanged, Qt::UniqueConnection);
+        connect(base, &QGraphicsObject::xChanged, this, &LadderScene::editorContentChanged, Qt::UniqueConnection);
+        connect(base, &QGraphicsObject::yChanged, this, &LadderScene::editorContentChanged, Qt::UniqueConnection);
+    }
+}
+
+void LadderScene::attachEditorItem(QGraphicsItem* item)
+{
+    addItem(item);
+    trackEditorItem(item);
+}
+
+void LadderScene::detachEditorItem(QGraphicsItem* item)
+{
+    if (item->data(0).isValid() && m_items.value(item->data(0).toInt()) == item)
+        m_items.remove(item->data(0).toInt());
+    removeItem(item);
+}
+
+void LadderScene::forgetEditorItem(QGraphicsItem* item)
+{
+    if (item->data(0).isValid() && m_items.value(item->data(0).toInt()) == item)
+        m_items.remove(item->data(0).toInt());
+}
+
+QList<QGraphicsItem*> LadderScene::deletionItems(const QList<QGraphicsItem*>& items) const
+{
+    return items;
+}
+
+void LadderScene::editorContentChanged()
+{
+    emit contentChanged();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -33,11 +82,13 @@ LadderScene::LadderScene(QObject *parent)
 // ══════════════════════════════════════════════════════════════
 void LadderScene::addFunctionBlock(const QString& typeName, const QPointF& scenePos)
 {
+    if (m_readOnly) return;
     auto snapG = [](qreal v) { return qRound(v / GridSize) * (qreal)GridSize; };
     const QPointF snapPos(snapG(scenePos.x()), snapG(scenePos.y()));
 
     auto* fb = new FunctionBlockItem(
         typeName, QString("%1_%2").arg(typeName).arg(m_fbCount++));
+    if (fb->isFunction()) fb->setInstanceName({});
     fb->setPos(snapPos);
     int lid = m_nextLocalId++;
     fb->setData(0, lid);
@@ -50,6 +101,7 @@ void LadderScene::addFunctionBlock(const QString& typeName, const QPointF& scene
 // ══════════════════════════════════════════════════════════════
 void LadderScene::setMode(EditorMode mode)
 {
+    if (m_readOnly) mode = Mode_Select;
     if (m_tempWire && mode != Mode_AddWire) {
         removeItem(m_tempWire);
         delete m_tempWire;
@@ -196,6 +248,7 @@ QPointF LadderScene::snapToNearestPort(const QPointF& pos, qreal radius) const
 // ══════════════════════════════════════════════════════════════
 void LadderScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (m_readOnly) { QGraphicsScene::mousePressEvent(event); return; }
     if (event->button() != Qt::LeftButton || m_mode == Mode_Select) {
         QGraphicsScene::mousePressEvent(event);
         // 选择模式下：记录当前选中 items 的位置，供拖拽结束时对比
@@ -235,6 +288,7 @@ void LadderScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
     if (m_mode == Mode_AddFuncBlock) {
         auto* fb = new FunctionBlockItem(
             "TON", QString("TON_%1").arg(m_fbCount++));
+        if (fb->isFunction()) fb->setInstanceName({});
         fb->setPos(snapPt);
         int fbLid = m_nextLocalId++;
         fb->setData(0, fbLid);
@@ -359,6 +413,7 @@ void LadderScene::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 // ══════════════════════════════════════════════════════════════
 void LadderScene::keyPressEvent(QKeyEvent *event)
 {
+    if (m_readOnly) { QGraphicsScene::keyPressEvent(event); return; }
     if (event->key() == Qt::Key_Delete ||
         event->key() == Qt::Key_Backspace)
     {
@@ -390,6 +445,7 @@ void LadderScene::keyPressEvent(QKeyEvent *event)
 // ══════════════════════════════════════════════════════════════
 void LadderScene::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
 {
+    if (m_readOnly) { event->ignore(); return; }
     const QPointF scenePos = event->scenePos();
     auto snapG = [&](qreal v) { return qRound(v / GridSize) * (qreal)GridSize; };
     const QPointF snapPt(snapG(scenePos.x()), snapG(scenePos.y()));
@@ -459,6 +515,7 @@ void LadderScene::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
             if (ok) {
                 auto* fb = new FunctionBlockItem(
                     fbType, QString("%1_%2").arg(fbType).arg(m_fbCount++));
+                if (fb->isFunction()) fb->setInstanceName({});
                 fb->setPos(snapPt);
                 int fbLid = m_nextLocalId++;
                 fb->setData(0, fbLid);

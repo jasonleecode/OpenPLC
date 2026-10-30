@@ -1,5 +1,9 @@
 # Editor PC 仿真设计
 
+> 2026-10-30 更新：P0 保存一致性与错误传播已修复。打开 SmartSim/仿真下载必须先保存成功；失败或取消不会继续执行旧文件。编辑保存回归、FBD 与 traffic 仿真通过，详见 [验证记录](editor-persistence.md)。
+
+> 2026-10-29 状态校正：本文保留阶段性设计过程，当前实现/优先级以 [TODO 复盘](../todo/architectural-review.md) 和 [待办清单](../todo/todo.md) 为准。下文“后续迁移变量表生成到 editor”已部分完成：SmartSimWidget::generateSimVars 已存在；基础 trace 协议和 SimDebugSession 也已实现，但尚未完整接入按 UI 需求订阅的工作流。构建与符号表仍未拆为独立服务，多类型/多实例、图形在线值及条件暂停仍需推进。保存一致性问题优先于这些扩展。
+
 ## 目标
 
 `editor/src/sim` 的目标是在没有 PLC 真机时，为 editor 编译结果提供一个可在 PC 上运行、可观察、可干预的 PLC 仿真环境。仿真环境应复用现有梯形图/FBD/SFC 到 ST、ST 到 matiec C 的编译链路，避免在 editor 里维护另一套 PLC 语义解释器。

@@ -31,6 +31,10 @@ class PlcOpenViewer : public LadderScene
     Q_OBJECT
 public:
     explicit PlcOpenViewer(QObject* parent = nullptr);
+    ~PlcOpenViewer() override;
+    void forgetEditorItem(QGraphicsItem* item) override;
+    QList<QGraphicsItem*> deletionItems(const QList<QGraphicsItem*>& items) const override;
+    void editorContentChanged() override;
 
     // 从 PLCopen XML 字符串加载（含 "LD\n"/"FBD\n"/"SFC\n" 前缀）
     void loadFromXmlString(const QString& xmlBody);
@@ -75,6 +79,7 @@ private:
         qreal  customMidX = qQNaN();        // NaN=自动取中点; 否则为用户拖拽设置的折点 x
         qreal  srcJogY    = qQNaN();        // NaN=端口同高; 否则上段水平线 y（在 src 侧加垂直折）
         qreal  dstJogY    = qQNaN();        // NaN=端口同高; 否则下段水平线 y（在 dst 侧加垂直折）
+        QDomElement sourceConnection {};   // Preserve unexposed connection metadata.
     };
 
     // 端口反向查找结果（场景坐标 → 最近的 item 端口）
@@ -85,10 +90,8 @@ private:
         bool    valid()  const { return lid >= 0; }
     };
 
-    void    updateAllWires();
-    void    syncPositionsToDoc();       // item 坐标 → m_bodyDoc <position>
-    void    syncWirePathsToDoc();       // 导线折点 → m_bodyDoc <connection>/<position>
-    void    buildBodyFromScene();       // 从场景 item 重建 m_bodyDoc（新建画布用）
+    void    updateAllWires(bool reroute = true);
+    QDomDocument buildBodyFromScene() const;       // 从场景 item 重建 m_bodyDoc（新建画布用）
 
     QPointF getOutputPortScene(int lid, const QString& param) const;
     QPointF getInputPortScene (int lid, const QString& param) const;
@@ -131,7 +134,6 @@ private:
     // 可修改的 body DOM（用于序列化）
     QString      m_bodyLanguage;       // "FBD" / "LD" / "SFC"
     QDomDocument m_bodyDoc;
-    bool         m_isNewScene = false; // true = initEmpty() 创建，需 buildBodyFromScene()
 
     // ── 折线画线模式折点积累 ──────────────────────────────────
     QList<QPointF> m_wirePoints;  // 已点击固定的折点（第一点到倒数第二点）

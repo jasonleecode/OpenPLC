@@ -118,7 +118,7 @@ void LadderView::dropEvent(QDropEvent *event)
         return;
     }
     auto* ls = qobject_cast<LadderScene*>(scene());
-    if (!ls) {
+    if (!ls || ls->isReadOnly()) {
         event->ignore();
         return;
     }

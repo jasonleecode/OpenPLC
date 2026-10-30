@@ -32,8 +32,9 @@ public:
     void newProject();
     void openProject();
     bool openProject(const QString& path);
-    void saveProject();
-    void saveProjectAs();
+    bool saveProject();
+    bool saveProjectAs();
+    bool confirmSaveChanges();
 
     // ── 启动时调用一次，创建内置示例项目 ─────────────────────────
     void buildDefaultProject();
@@ -56,7 +57,7 @@ signals:
     void statusMessage(const QString& msg, int timeoutMs);
 
 private:
-    void doSaveTo(const QString& path);
+    bool doSaveTo(const QString& path);
 
     ProjectModel*                    m_project = nullptr;
     QMap<PouModel*, PlcOpenViewer*>* m_sceneMap = nullptr;

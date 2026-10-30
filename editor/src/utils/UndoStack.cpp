@@ -1,4 +1,5 @@
 #include "UndoStack.h"
+#include "../editor/scene/LadderScene.h"
 
 // ─────────────────────────────────────────────────────────────
 // AddItemCmd
@@ -10,19 +11,24 @@ AddItemCmd::AddItemCmd(QGraphicsScene* scene, QGraphicsItem* item,
 
 AddItemCmd::~AddItemCmd()
 {
-    if (m_owned) delete m_item;
+    if (m_owned) {
+        if (auto* scene = qobject_cast<LadderScene*>(m_scene)) scene->forgetEditorItem(m_item);
+        delete m_item;
+    }
 }
 
 void AddItemCmd::redo()
 {
     // 若 item 已在 scene（如导线预览已添加），addItem 是无害的幂等操作
-    m_scene->addItem(m_item);
+    if (auto* scene = qobject_cast<LadderScene*>(m_scene)) scene->attachEditorItem(m_item);
+    else m_scene->addItem(m_item);
     m_owned = false;
 }
 
 void AddItemCmd::undo()
 {
-    m_scene->removeItem(m_item);
+    if (auto* scene = qobject_cast<LadderScene*>(m_scene)) scene->detachEditorItem(m_item);
+    else m_scene->removeItem(m_item);
     m_owned = true;
 }
 
@@ -33,24 +39,34 @@ DeleteItemsCmd::DeleteItemsCmd(QGraphicsScene* scene,
                                 const QList<QGraphicsItem*>& items,
                                 const QString& text, QUndoCommand* parent)
     : QUndoCommand(text, parent), m_scene(scene), m_items(items), m_owned(false)
-{}
+{
+    if (auto* editor = qobject_cast<LadderScene*>(scene)) m_items = editor->deletionItems(items);
+}
 
 DeleteItemsCmd::~DeleteItemsCmd()
 {
-    if (m_owned) qDeleteAll(m_items);
+    if (m_owned) {
+        if (auto* scene = qobject_cast<LadderScene*>(m_scene))
+            for (auto* item : m_items) scene->forgetEditorItem(item);
+        qDeleteAll(m_items);
+    }
 }
 
 void DeleteItemsCmd::redo()
 {
-    for (QGraphicsItem* item : m_items)
-        m_scene->removeItem(item);
+    for (QGraphicsItem* item : m_items) {
+        if (auto* scene = qobject_cast<LadderScene*>(m_scene)) scene->detachEditorItem(item);
+        else m_scene->removeItem(item);
+    }
     m_owned = true;
 }
 
 void DeleteItemsCmd::undo()
 {
-    for (QGraphicsItem* item : m_items)
-        m_scene->addItem(item);
+    for (QGraphicsItem* item : m_items) {
+        if (auto* scene = qobject_cast<LadderScene*>(m_scene)) scene->attachEditorItem(item);
+        else m_scene->addItem(item);
+    }
     m_owned = false;
 }
 
@@ -72,4 +88,24 @@ void MoveItemsCmd::undo()
 {
     for (const auto& e : m_moves)
         e.item->setPos(e.before);
+}
+
+namespace {
+class EditTextCmd : public QUndoCommand {
+    QString m_before, m_after;
+    std::function<void(const QString&)> m_setter;
+public:
+    EditTextCmd(QString before, QString after, std::function<void(const QString&)> setter)
+        : QUndoCommand("Edit Property"), m_before(before), m_after(after), m_setter(setter) {}
+    void redo() override { m_setter(m_after); }
+    void undo() override { m_setter(m_before); }
+};
+}
+void editItemText(QGraphicsItem* item, const QString& before, const QString& after,
+                  const std::function<void(const QString&)>& setter)
+{
+    if (before == after) return;
+    if (auto* scene = qobject_cast<LadderScene*>(item->scene()))
+        scene->undoStack()->push(new EditTextCmd(before, after, setter));
+    else setter(after);
 }

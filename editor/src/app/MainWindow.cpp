@@ -1,3 +1,4 @@
+#include <QCloseEvent>
 #include "MainWindow.h"
 #include "ProjectManager.h"
 
@@ -45,6 +46,7 @@
 #include <QDataStream>
 #include <QMenu>
 #include <QTimer>
+#include <QPointer>
 #include <QDomDocument>
 #include <QCoreApplication>
 #include <QUndoStack>
@@ -156,6 +158,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_projectManager, &ProjectManager::projectCreated,
             this, [this](ProjectModel* newProj) {
         closeAllPouTabs();
+        qDeleteAll(m_sceneMap);
         m_sceneMap.clear();
         if (m_projPropSubWin) m_projPropSubWin->close();
 
@@ -182,22 +185,20 @@ MainWindow::MainWindow(QWidget *parent)
     updateWindowTitle();
 }
 
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (m_projectManager && !m_projectManager->confirmSaveChanges()) {
+        event->ignore();
+        return;
+    }
+    QMainWindow::closeEvent(event);
+}
+
 MainWindow::~MainWindow()
 {
-    // ── 析构顺序问题修复 ────────────────────────────────────────
-    // C++ 析构顺序：① 析构体执行 → ② 成员变量析构 → ③ 基类析构
-    // Qt 在 ③（~QObject）中才删除子对象（deleteChildren）。
-    //
-    // 问题：m_subWinPouMap（值类型 QMap，成员变量）在 ② 被销毁，
-    // 但 ③ 删除 MDI 子窗口时触发 destroyed 信号，lambda 仍试图
-    // 访问 m_subWinPouMap.remove(sw) → use-after-destruction → SIGSEGV。
-    //
-    // 修复：在 ① 中提前断开所有子窗口的 destroyed 信号，让 ② 之后
-    // 的子窗口删除不再触发 lambda。
-    if (m_mdiArea) {
-        for (QMdiSubWindow* sw : m_mdiArea->subWindowList())
-            sw->disconnect(this);
-    }
+    closeAllPouTabs();
+    qDeleteAll(m_sceneMap);
+    m_sceneMap.clear();
 }
 
 // ============================================================
@@ -1216,7 +1217,7 @@ void MainWindow::setupCentralArea()
         const bool isGraphical = pou &&
             (pou->language == PouLanguage::LD  ||
              pou->language == PouLanguage::FBD ||
-             pou->language == PouLanguage::SFC);
+             pou->language == PouLanguage::SFC) && m_scene && !m_scene->isReadOnly();
         for (QAction* a : m_ldToolActions) a->setVisible(isGraphical);
 
         // 根据视图类型连接 Undo/Redo 使能信号
@@ -1431,8 +1432,10 @@ void MainWindow::openSmartSim()
         return;
     }
 
-    ProjectManager::syncScenesBeforeSave(m_sceneMap);
-    m_project->saveToFile(m_project->filePath);
+    if (!m_projectManager->saveProject()) {
+        statusBar()->showMessage("Save failed or cancelled; operation stopped.", 5000);
+        return;
+    }
 
     if (m_smartSimWindow) {
         if (m_libraryTabs && m_debuggerTable)
@@ -2023,15 +2026,18 @@ QWidget* MainWindow::createPouEditorWidget(PouModel* pou)
                 scene->initEmpty(langStr);
             }
             m_sceneMap[pou] = scene;
+            connect(scene, &LadderScene::contentChanged, m_project, &ProjectModel::markDirty);
         }
 
         auto* view = new LadderView();
         view->setScene(scene);
+        if (scene->isReadOnly()) view->setToolTip("SFC preview — graphical editing is not supported yet.");
 
         if (!m_scene) m_scene = scene;
 
         // 延迟 fitInView，等 MDI 子窗口完成布局后再缩放（0ms 有时不够）
-        QTimer::singleShot(50, view, [view, scene](){
+        QTimer::singleShot(50, scene, [view = QPointer<LadderView>(view), scene](){
+            if (!view) return;
             QRectF r = scene->itemsBoundingRect().adjusted(-40, -40, 40, 40);
             if (r.isEmpty())
                 r = QRectF(0, 0, 800, 600);
@@ -2058,8 +2064,9 @@ QWidget* MainWindow::createPouEditorWidget(PouModel* pou)
 
         new StHighlighter(editor->document());
 
-        connect(editor, &QPlainTextEdit::textChanged, [pou, editor](){
+        connect(editor, &QPlainTextEdit::textChanged, m_project, [project = m_project, pou, editor](){
             pou->code = editor->toPlainText();
+            project->markDirty();
         });
         editorArea = editor;
 
@@ -2099,6 +2106,11 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
     hlay->setSpacing(6);
     hlay->addWidget(new QLabel("Description:"));
     auto* descEdit = new QLineEdit(pou->description);
+    descEdit->setObjectName("pouDescription");
+    connect(descEdit, &QLineEdit::textChanged, m_project, [project = m_project, pou](const QString& text) {
+        pou->description = text;
+        project->markDirty();
+    });
     hlay->addWidget(descEdit, 1);
     hlay->addSpacing(16);
     hlay->addWidget(new QLabel("Class Filter:"));
@@ -2176,12 +2188,13 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
     table->blockSignals(false);
 
     // —— + 按钮：追加一行空变量 ——
-    connect(btnAdd, &QPushButton::clicked, table, [table, pou, fillRow, refreshNumbers]() {
+    connect(btnAdd, &QPushButton::clicked, table, [this, table, pou, fillRow, refreshNumbers]() {
         VariableDecl v;
         v.name     = QString("var%1").arg(pou->variables.size() + 1);
         v.varClass = "Local";
         v.type     = "BOOL";
         pou->variables.append(v);
+        m_project->markDirty();
 
         table->blockSignals(true);
         int row = table->rowCount();
@@ -2195,7 +2208,7 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
     });
 
     // —— - 按钮：删除选中行 ——
-    connect(btnDel, &QPushButton::clicked, table, [table, pou, refreshNumbers]() {
+    connect(btnDel, &QPushButton::clicked, table, [this, table, pou, refreshNumbers]() {
         QList<int> rows;
         for (auto* sel : table->selectedItems())
             if (!rows.contains(sel->row())) rows.append(sel->row());
@@ -2205,6 +2218,7 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
         for (int r : rows) {
             if (r >= 0 && r < pou->variables.size()) {
                 pou->variables.removeAt(r);
+                m_project->markDirty();
                 table->removeRow(r);
             }
         }
@@ -2213,11 +2227,12 @@ QWidget* MainWindow::createVarDeclWidget(PouModel* pou)
     });
 
     // —— cellChanged：将编辑同步回 PouModel ——
-    connect(table, &QTableWidget::cellChanged, [table, pou](int row, int col) {
+    connect(table, &QTableWidget::cellChanged, m_project, [project = m_project, table, pou](int row, int col) {
         if (row < 0 || row >= pou->variables.size()) return;
         auto* it = table->item(row, col);
         if (!it) return;
         VariableDecl& v = pou->variables[row];
+        project->markDirty();
         switch (col) {
         case 1: v.name      = it->text(); break;
         case 2: v.varClass  = it->text(); break;
@@ -2260,7 +2275,7 @@ void MainWindow::openRecentProject(const QString& path)
 
 void MainWindow::saveProject()
 {
-    m_projectManager->saveProject();
+    if (!m_projectManager->saveProject()) return;
     if (m_project && !m_project->filePath.isEmpty())
         addRecentProject(m_project->filePath);
 }
@@ -2268,7 +2283,7 @@ void MainWindow::saveProject()
 void MainWindow::saveProjectAs()
 {
     const QString before = m_project ? m_project->filePath : QString();
-    m_projectManager->saveProjectAs();
+    if (!m_projectManager->saveProjectAs()) return;
     if (m_project && !m_project->filePath.isEmpty() && m_project->filePath != before)
         addRecentProject(m_project->filePath);
 }
@@ -2366,8 +2381,10 @@ void MainWindow::buildProject()
         QString("[ Build ] Building \"%1\" ...").arg(m_project->projectName));
 
     // ── 自动同步并保存 ──────────────────────────────────────────────
-    ProjectManager::syncScenesBeforeSave(m_sceneMap);
-    m_project->saveToFile(m_project->filePath);
+    if (!m_projectManager->saveProject()) {
+        statusBar()->showMessage("Save failed or cancelled; operation stopped.", 5000);
+        return;
+    }
 
     // ── Step 1/3: 生成 IEC 61131-3 ST ──────────────────────────────
     m_consoleEdit->appendPlainText("[ 1/5 ] Generating IEC 61131-3 ST ...");
@@ -2907,8 +2924,10 @@ void MainWindow::downloadProject()
             return;
         }
 
-        ProjectManager::syncScenesBeforeSave(m_sceneMap);
-        m_project->saveToFile(m_project->filePath);
+        if (!m_projectManager->saveProject()) {
+            statusBar()->showMessage("Save failed or cancelled; download stopped.", 5000);
+            return;
+        }
 
         if (!m_smartSimWindow)
             openSmartSim();

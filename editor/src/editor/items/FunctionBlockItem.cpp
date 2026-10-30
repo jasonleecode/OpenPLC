@@ -1,3 +1,4 @@
+#include "../../utils/UndoStack.h"
 #include "FunctionBlockItem.h"
 #include "../../app/BlockPropertiesDialog.h"
 
@@ -47,11 +48,11 @@ static void ensureLibLoaded() {
     QDomDocument doc;
     if (!doc.setContent(&file)) return;
 
-    QDomElement root = doc.documentElement(); // <library>
-    for (QDomElement cat = root.firstChildElement("category"); !cat.isNull();
-         cat = cat.nextSiblingElement("category")) {
-        for (QDomElement elem = cat.firstChildElement(); !elem.isNull();
-             elem = elem.nextSiblingElement()) {
+    // Categories are nested; collect definitions at every depth.
+    for (const QString& tag : {QString("function"), QString("functionBlock")}) {
+        const auto definitions = doc.elementsByTagName(tag);
+        for (int i = 0; i < definitions.count(); ++i) {
+            const auto elem = definitions.at(i).toElement();
             const QString name = elem.attribute("name");
             if (name.isEmpty()) continue;
             LibInfo info;
@@ -85,6 +86,11 @@ struct FbPortDef {
 };
 
 static FbPortDef defaultPorts(const QString& type) {
+    const auto definition = lookupLib(type);
+    // A function's result is its declared output. An invented first ENO port
+    // would make the compiler bind the return value to the wrong port.
+    if (definition.valid && definition.kind == "function")
+        return {definition.inNames, definition.outNames};
     if (type == "TON" || type == "TOF")
         return { {"EN","IN","PT"}, {"ENO","Q","ET"} };
     if (type == "TONR")
@@ -105,6 +111,8 @@ static FbPortDef defaultPorts(const QString& type) {
         return { {"EN","S1","R"}, {"ENO","Q1"} };
     if (type == "RS")
         return { {"EN","S","R1"}, {"ENO","Q1"} };
+    if (definition.valid)
+        return {QStringList{"EN"} + definition.inNames, QStringList{"ENO"} + definition.outNames};
     // 默认：两输入两输出
     return { {"EN","IN"}, {"ENO","OUT"} };
 }
@@ -344,11 +352,18 @@ QPointF FunctionBlockItem::leftPort()  const { return inputPortPos(0); }
 QPointF FunctionBlockItem::rightPort() const { return outputPortPos(0); }
 
 // ── 属性编辑 ──────────────────────────────────────────────────
+bool FunctionBlockItem::isFunction() const {
+    return lookupLib(m_blockType).kind == "function";
+}
+
 void FunctionBlockItem::setBlockType(const QString& t) {
+    if (m_blockType == t) return;
     m_blockType = t;
+    m_hasXmlGeom = false;
     rebuildPorts();
     setToolTip(QString("%1 — Double-click to edit").arg(t));
     update();
+    emit contentChanged();
 }
 
 void FunctionBlockItem::setCustomPorts(const QStringList& inputs,
@@ -361,8 +376,10 @@ void FunctionBlockItem::setCustomPorts(const QStringList& inputs,
 }
 
 void FunctionBlockItem::setInstanceName(const QString& n) {
+    if (m_instanceName == n) return;
     m_instanceName = n;
     update();
+    emit contentChanged();
 }
 
 // 拖动时使用细网格吸附，不做梯级中心吸附。
@@ -404,6 +421,6 @@ void FunctionBlockItem::editProperties() {
     if (dlg.exec() == QDialog::Accepted) {
         const QString newName = dlg.getInstanceName().trimmed();
         if (!newName.isEmpty())
-            setInstanceName(newName);
+            editItemText(this, m_instanceName, newName, [this](const QString& value) { setInstanceName(value); });
     }
 }

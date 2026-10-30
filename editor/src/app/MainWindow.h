@@ -44,6 +44,7 @@ enum class PlcRunState {
 // ─────────────────────────────────────────────────────────────
 class MainWindow : public QMainWindow {
     Q_OBJECT
+    friend class EditorPersistenceTest;
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
@@ -52,6 +53,9 @@ public:
     // 供外部（网络线程等）更新 PLC 状态
     void setPlcConnState(PlcConnState state);
     void setPlcRunState (PlcRunState  state);
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private:
     // ---- 初始化各区域 ----

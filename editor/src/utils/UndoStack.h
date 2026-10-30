@@ -4,6 +4,11 @@
 #include <QGraphicsItem>
 #include <QPointF>
 #include <QList>
+#include <functional>
+
+// Property dialogs use the same history as placement and movement.
+void editItemText(QGraphicsItem* item, const QString& before, const QString& after,
+                  const std::function<void(const QString&)>& setter);
 
 // ── 放置单个元件 ──────────────────────────────────────────────
 //   redo : addItem  (命令放弃所有权 → scene 持有)

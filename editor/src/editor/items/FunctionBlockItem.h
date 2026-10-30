@@ -45,6 +45,7 @@ public:
     QString blockType()    const { return m_blockType;    }
     QString instanceName() const { return m_instanceName; }
 
+    bool isFunction() const;
     void setBlockType(const QString& t);
     void setInstanceName(const QString& n);
 
